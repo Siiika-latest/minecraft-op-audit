@@ -159,5 +159,95 @@ check("高频物品含钻石", "minecraft:diamond" in dict(p7["top_items"]), Tru
 
 check("空目录不报错", d.build_payload({"days": ["all"]}, conf)["total_all"] >= 0, True)
 
+# ============================================================
+# 三、排行榜 / 百分位
+# ============================================================
+print("\n=== 排行榜与百分位 ===")
+tmp2 = tempfile.mkdtemp(prefix="mcaudit-lb-")
+atexit.register(shutil.rmtree, tmp2, True)
+d.LOG_DIR = tmp2
+d._cache["sig"] = None
+
+
+def ev(date, t, actor, target="", killer=""):
+    return {"ts": date + " 12:00:00", "date_bj": date, "type": t, "actor": actor,
+            "target": target, "killer": killer, "item_id": "", "item_zh": "",
+            "detail_cn": t, "raw": "%s|%s|%s" % (t, actor, target)}
+
+
+LB = []
+# 2026-09-20：Alice 6 管理 + 2 死亡，Bob 3 管理 + 5 死亡，Carol 各 1
+#            Dave 只作为「对象」出现，没有任何自己的行为 → 两个榜都不该有他
+LB += [ev("2026-09-20", "give", "Alice", "Alice")] * 5
+LB += [ev("2026-09-20", "death", "Alice")] * 2
+LB += [ev("2026-09-20", "gamemode", "Bob", "Bob")] * 3
+LB += [ev("2026-09-20", "death", "Bob")] * 5
+LB += [ev("2026-09-20", "give", "Carol"), ev("2026-09-20", "death", "Carol")]
+LB += [ev("2026-09-20", "give", "console", "Dave")]      # 控制台不是玩家
+LB += [ev("2026-09-20", "give", "Alice", "@a")]          # 选择器对象不是玩家；Alice 仍是执行者
+# 2026-09-19：Eve 与 Frank 并列第一，Gina 垫底，且当天无人死亡
+LB += [ev("2026-09-19", "give", "Eve")] * 4
+LB += [ev("2026-09-19", "give", "Frank")] * 4
+LB += [ev("2026-09-19", "give", "Gina")]
+
+for _day in ("2026-09-19", "2026-09-20"):
+    with open(os.path.join(tmp2, "events-%s.jsonl" % _day), "w", encoding="utf-8") as f:
+        for _e in LB:
+            if _e["date_bj"] == _day:
+                f.write(json.dumps(_e, ensure_ascii=False) + "\n")
+
+pl = d.build_payload({"days": ["all"]}, conf)
+lb = pl["leaderboard"]
+check("榜单可用日期", lb["days"], ["2026-09-19", "2026-09-20"])
+check("默认取最新一天", lb["date"], "2026-09-20")
+check("★ 管理榜最高分为 100", lb["admin"][0]["pct"], 100)
+check("★ 100 对应金色", lb["admin"][0]["tier"], "gold")
+check("管理榜完整结果（名次/次数/百分位/色阶）",
+      [(r["name"], r["value"], r["pct"], r["tier"]) for r in lb["admin"]],
+      [("Alice", 6, 100, "gold"), ("Bob", 3, 67, "blue"), ("Carol", 1, 33, "green")])
+check("死亡榜第一名", lb["death"][0]["name"], "Bob")
+check("★ 死亡榜最高分也是 100 金色", (lb["death"][0]["pct"], lb["death"][0]["tier"]), (100, "gold"))
+check("死亡榜完整顺序", [(r["name"], r["value"]) for r in lb["death"]],
+      [("Bob", 5), ("Alice", 2), ("Carol", 1)])
+check("★ 控制台不进玩家榜", [r["name"] for r in lb["admin"]].count("console"), 0)
+check("★ 只作为对象、自己没有行为的玩家不上榜", [r["name"] for r in lb["admin"]].count("Dave"), 0)
+check("★ 同一个人也不会因「只作为对象」进榜（Dave）",
+      [r["name"] for r in lb["death"]].count("Dave"), 0)
+check("选择器 @a 不算玩家", "@a" in [r["name"] for r in lb["admin"]], False)
+check("管理行为合计（不含控制台）", lb["admin_total"], 10)
+check("死亡次数合计", lb["death_total"], 8)
+check("名次连续", [r["rank"] for r in lb["admin"]], [1, 2, 3])
+
+p19 = d.build_payload({"days": ["all"], "lb": ["2026-09-19"]}, conf)
+lb19 = p19["leaderboard"]
+check("指定日期生效", lb19["date"], "2026-09-19")
+check("★ 并列第一同为 100 金色",
+      [(r["name"], r["pct"], r["tier"]) for r in lb19["admin"]],
+      [("Eve", 100, "gold"), ("Frank", 100, "gold"), ("Gina", 33, "green")])
+check("当日无人死亡 → 死亡榜为空", lb19["death"], [])
+check("不存在的日期回落到最新",
+      d.build_payload({"days": ["all"], "lb": ["1999-01-01"]}, conf)["leaderboard"]["date"],
+      "2026-09-20")
+
+check("榜单不受页面筛选影响", len(d.build_payload(
+    {"days": ["1"], "player": ["Bob"], "types": ["death"]}, conf)["leaderboard"]["admin"]), 3)
+
+plx = {x["name"]: x for x in pl["players"]}
+check("玩家板块新增死亡计数", plx["Bob"]["deaths"], 5)
+check("★ 死亡不并入「作为执行者」", plx["Bob"]["as_actor"], 3)
+check("死亡计入该玩家记录数", plx["Bob"]["count"], 8)
+check("Alice 记录数（6 管理 + 2 死亡）", plx["Alice"]["count"], 8)
+check("Alice 死亡计数", plx["Alice"]["deaths"], 2)
+check("只作为对象的玩家仍在玩家板块（Dave）", plx["Dave"]["as_target"], 1)
+check("Dave 自己没有任何行为", (plx["Dave"]["as_actor"], plx["Dave"]["deaths"]), (0, 0))
+check("类型统计含 death", pl["stats"].get("death"), 8)
+
+print("\n=== 色阶边界 ===")
+TIER_CASES = [(100, "gold"), (99, "pink"), (98, "orange"), (95, "orange"), (91, "orange"),
+              (90, "purple"), (76, "purple"), (75, "blue"), (60, "blue"), (51, "blue"),
+              (50, "green"), (26, "green"), (25, "gray"), (10, "gray"), (1, "gray"), (0, "gray")]
+for _v, _want in TIER_CASES:
+    check("tier_of(%d)" % _v, d.tier_of(_v), _want)
+
 print("\n通过 %d/%d" % (ok, total))
 sys.exit(0 if ok == total else 1)

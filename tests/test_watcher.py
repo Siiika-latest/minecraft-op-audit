@@ -71,6 +71,15 @@ def mkline(actor, cmd, gm="", ms="1789606800000", head="17Sep2026 09:00:00.000")
             "admin_audit.js#45: [MCAUDIT] " % head + payload)
 
 
+def mkdeath(actor, cause="fall", killer="", msg="", gm="", ms="1789606800000",
+            head="17Sep2026 09:00:00.000"):
+    """构造一行死亡事件（采集端 EntityEvents.death 的真实输出）"""
+    payload = json.dumps({"ev": "death", "ms": ms, "actor": actor, "cause": cause,
+                          "killer": killer, "msg": msg, "gm": gm}, ensure_ascii=False)
+    return ("[%s] [Server thread/INFO] [KubeJS Server/]: "
+            "admin_audit.js#180: [MCAUDIT] " % head + payload)
+
+
 def parse(line):
     ev = w.parse_line(line, names, CONF)
     return w.enrich(ev, names) if ev else None
@@ -155,6 +164,62 @@ ev = parse(mkline("Player1", "give Player1 minecraft:diamond 1", "creative"))
 check("执行者", ev["actor"], "Player1")
 check("当时模式", ev["gm"], "creative")
 check("详情含模式", "creative" in ev["detail_cn"], True)
+
+print("\n=== 玩家死亡事件 ===")
+d1 = parse(mkdeath("Player1", cause="player_attack", killer="Player2",
+                   msg="Player1 was slain by Player2", gm="survival"))
+check("类型为 death", d1["type"], "death")
+check("执行者=死亡玩家", d1["actor"], "Player1")
+check("击杀者写进详情", "Player2" in d1["detail_cn"], True)
+check("死因中文化", "被玩家击杀" in d1["detail_cn"], True)
+check("数量为空", d1["count"], None)
+check("无物品字段", (d1["item_id"], d1["item_zh"]), ("", ""))
+check("游戏内死讯保留", d1["msg"], "Player1 was slain by Player2")
+check("模式后缀", "survival" in d1["detail_cn"], True)
+check("★ 击杀者不写进 target（否则僵尸会混进玩家榜）", d1["target"], "")
+check("时间戳正常换算", d1["ts"], "2026-09-17 09:00:00")
+
+d2 = parse(mkdeath("Player2", cause="fall"))
+check("无凶手时的详情", d2["detail_cn"], "Player2 死亡（死因：坠落）")
+
+d3 = parse(mkdeath("Player3", cause="mob_attack", killer="Zombie"))
+check("生物击杀者保留原样", "Zombie" in d3["detail_cn"], True)
+check("生物击杀者同样不进 target", d3["target"], "")
+
+d4 = parse(mkdeath("Player4", cause="some_mod:weird_damage"))
+check("未收录死因原样显示", "some_mod:weird_damage" in d4["detail_cn"], True)
+
+# ── 下面这组 id 是 2026-09-17 在 AFoP 服务端（1.20.1 / KubeJS 6）用 /damage 一个个
+#    实测 dump 出来的真实 DamageType.msgId()，**不是**猜的注册名。别改回去。
+#    两个最容易踩的：mob_attack 的 msgId 是 "mob"、player_attack 的 msgId 是 "player"。
+d5 = parse(mkdeath("Player5", cause="player", killer="Player6"))
+check("★ 实测 id: player（不是 player_attack）", "被玩家击杀" in d5["detail_cn"], True)
+d6 = parse(mkdeath("Player6", cause="mob", killer="Skeleton"))
+check("★ 实测 id: mob（不是 mob_attack）", "被生物击杀" in d6["detail_cn"], True)
+d7 = parse(mkdeath("Player7", cause="inWall"))
+check("★ 驼峰 id 能查表: inWall", "卡在方块里" in d7["detail_cn"], True)
+d8 = parse(mkdeath("Player8", cause="outOfWorld"))
+check("★ 驼峰 id 能查表: outOfWorld", "掉出世界" in d8["detail_cn"], True)
+d9 = parse(mkdeath("Player9", cause="genericKill"))
+check("★ 驼峰 id 能查表: genericKill", "被清除" in d9["detail_cn"], True)
+d10 = parse(mkdeath("Player10", cause="lightningBolt"))
+check("★ 驼峰 id 能查表: lightningBolt", "被雷劈" in d10["detail_cn"], True)
+check("★ cause 字段保留原始 msgId", d7["cause"], "inWall")
+check("★ 另外给出 cause_cn 供看板直接显示", d7["cause_cn"], "卡在方块里")
+check("cause_key: 驼峰转蛇形", w.cause_key("hotFloor"), "hot_floor")
+check("cause_key: 不动模组自造 id", w.cause_key("some_mod:weird_damage"), "some_mod:weird_damage")
+check("cause_key: 空值", w.cause_key(""), "")
+
+check("死因映射: lava", w.CAUSE_CN.get("lava"), "岩浆")
+check("死因映射: out_of_world", w.CAUSE_CN.get("out_of_world"), "掉出世界")
+check("默认配置已启用 death", "death" in w.DEFAULT_CONF["enabled_types"], True)
+check("类型中文名", w.TYPE_CN.get("death"), "玩家死亡")
+
+# 采集器必须能把死亡行与命令行区分开
+check("旧格式（无 ev 字段）仍按命令解析",
+      parse(mkline("Player1", "give Player1 minecraft:diamond 1"))["type"], "give")
+check("ev=cmd 显式声明也算命令",
+      parse(mkline("Player1", "gamemode creative"))["type"], "gamemode")
 
 print("\n=== 映射表缺失时的降级 ===")
 empty = w.Names(os.path.join(_tmp, "not-exist.json"))

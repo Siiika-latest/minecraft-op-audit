@@ -40,9 +40,9 @@ DEFAULT_CONF = {
     "first_run_from_end": True,
     # 服务端日志行时间戳所在时区。仅在事件缺毫秒时间戳时用于兜底换算北京时间
     "log_tz": "UTC",
-    # 需要记录的敏感行为类型
+    # 需要记录的敏感行为类型（death = 玩家死亡）
     "enabled_types": ["give", "item_set", "loot", "clear", "gamemode", "gamemode_other",
-                      "enchant", "effect", "xp", "op", "summon"],
+                      "enchant", "effect", "xp", "op", "summon", "death"],
     # 是否把所有其它命令也记进台账（默认关闭，避免噪音）
     "log_other_commands": False,
 }
@@ -63,9 +63,68 @@ TYPE_CN = {
     "op": "权限变更",
     "summon": "管理员刷实体",
     "clear": "清空玩家物品",
+    "death": "玩家死亡",
     "other": "其它命令",
     "raw_cmd": "命令原文(兜底)",
 }
+
+# 死因 id → 中文。未收录的原样显示。
+#
+# ⚠ 左侧一律写「规范化后的 msgId」：MC 的 DamageType.msgId() 实际返回**驼峰**
+#   （inWall / outOfWorld / genericKill / lightningBolt / hotFloor），
+#   而伤害类型的注册名是蛇形（in_wall / out_of_world / generic_kill …）。
+#   查表前会先跑 cause_key() 把驼峰转成蛇形，所以同一张表能同时接住两种写法。
+#   另外两个容易写错的特例（1.20.1 实测）：
+#     mob_attack  → msgId 是 "mob"
+#     player_attack → msgId 是 "player"
+#   两个都列在表里，避免写成 mob_attack / player_attack 之后查不到。
+CAUSE_CN = {
+    # ── 环境伤害
+    "fall": "坠落", "lava": "岩浆", "hot_floor": "踩到岩浆块",
+    "fire": "着火", "on_fire": "被火烧", "in_fire": "身处火中",
+    "drown": "溺水", "starve": "饿死", "freeze": "冻死", "cactus": "仙人掌",
+    "sweet_berry_bush": "甜浆果丛", "lightning_bolt": "被雷劈",
+    "fly_into_wall": "撞墙（鞘翅）", "in_wall": "卡在方块里", "cramming": "被挤压",
+    "out_of_world": "掉出世界", "generic": "通用伤害", "generic_kill": "被清除",
+    "falling_block": "被方块砸死", "falling_stalactite": "被钟乳石砸死",
+    "stalagmite": "踩到石笋", "anvil": "被铁砧砸死",
+    # ── 战斗（"mob"/"player" 是实测值，"mob_attack"/"player_attack" 是同义别名）
+    "mob": "被生物击杀", "mob_attack": "被生物击杀",
+    "player": "被玩家击杀", "player_attack": "被玩家击杀",
+    "mob_attack_no_aggro": "被中立生物击杀", "no_aggro": "无仇恨伤害",
+    "arrow": "被箭射死", "trident": "被三叉戟戳死", "thrown": "被投掷物击中",
+    "fireball": "被火球击中", "unattributed_fireball": "被火球击中",
+    "wither_skull": "被凋零之首击中", "wind_charge": "风弹", "mace_smash": "锤击",
+    "sting": "被蛰", "thorns": "反伤", "sonic_boom": "监守者音爆",
+    # ── 魔法 / 爆炸
+    "magic": "魔法伤害", "indirect_magic": "间接魔法", "wither": "凋零效果",
+    "dragon_breath": "龙息",
+    "explosion": "爆炸", "explosion.player": "玩家引爆的爆炸",
+    "player_explosion": "玩家引爆的爆炸",
+}
+
+
+def cause_key(cause):
+    """死因 id → 查表用的规范化 key（驼峰转蛇形 + 小写）。
+
+    MC 的 DamageType.msgId() 给的是驼峰（inWall），注册名是蛇形（in_wall）；
+    模组自造的 id（如 some_mod:weird_damage）没有大写字母，转换后原样保留。
+    """
+    s = (cause or "").strip()
+    if not s:
+        return ""
+    s = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", s)
+    return s.lower()
+
+
+def cause_cn(cause):
+    """死因 → 中文描述；未收录的原样返回，空则「未知」"""
+    if not cause:
+        return "未知"
+    key = cause_key(cause)
+    if key in CAUSE_CN:
+        return CAUSE_CN[key]
+    return CAUSE_CN.get(cause, cause)
 
 
 def log(msg):
@@ -273,6 +332,24 @@ def enrich(ev, names):
     # @s 表示"执行者自己"，直接还原成执行者名，便于按玩家统计
     if ev.get("target") == "@s" and actor and actor not in ("console", "unknown-player"):
         ev["target"] = actor
+
+    # 玩家死亡：没有物品，也没有「对象玩家」。
+    # 击杀者刻意**不写进 target** —— 否则僵尸、骷髅会被当成玩家混进玩家榜。
+    if ev.get("type") == "death":
+        ev["item_id"], ev["item_zh"], ev["item_en"] = "", "", ""
+        ev["target"] = ""
+        cause = ev.get("cause", "") or ""
+        cz = cause_cn(cause)
+        ev["cause_cn"] = cz                     # 供看板直接显示（cause 保留原始 msgId）
+        killer = ev.get("killer", "") or ""
+        if killer:
+            ev["detail_cn"] = "%s 被 %s 击杀（死因：%s）" % (actor, killer, cz)
+        else:
+            ev["detail_cn"] = "%s 死亡（死因：%s）" % (actor, cz)
+        if ev.get("gm"):
+            ev["detail_cn"] += "（当时模式：%s）" % ev["gm"]
+        return ev
+
     if ev.pop("is_xp", False):
         iid, izh, ien = "minecraft:experience", "经验", "Experience"
     elif ev.pop("is_perm", False):
@@ -347,9 +424,18 @@ def parse_line(line, names, conf, now_utc=None):
     cmd = str(d.get("cmd", ""))
     actor = str(d.get("actor", "console") or "console")
     gm = str(d.get("gm", "") or "")
-    ev = classify(cmd, actor, conf.get("log_other_commands", False))
-    if not ev:
-        return None
+    if str(d.get("ev", "") or "") == "death":
+        # 玩家死亡：不走命令分类器，直接构造事件
+        ev = dict(type="death", target="", item_raw="", count=None,
+                  cause=str(d.get("cause", "") or ""),
+                  killer=str(d.get("killer", "") or ""),
+                  msg=str(d.get("msg", "") or ""))
+        cmd = ""
+    else:
+        # 没有 ev 字段的老格式（只有命令事件）也走这里，保证向后兼容
+        ev = classify(cmd, actor, conf.get("log_other_commands", False))
+        if not ev:
+            return None
     ev["actor"] = actor
     ev["gm"] = gm
     ev["cmd"] = cmd
@@ -403,7 +489,9 @@ class Sink:
                 ev["actor"], ev.get("gm", ""), ev.get("target", ""),
                 ev.get("item_id", ""), ev.get("item_zh", ""), ev.get("item_en", ""),
                 "" if ev.get("count") is None else ev["count"],
-                ev.get("detail_cn", ""), "/" + ev.get("cmd", ""), ev["raw"],
+                ev.get("detail_cn", ""),
+                ("/" + ev["cmd"]) if ev.get("cmd") else "",   # 死亡事件没有命令，留空
+                ev["raw"],
             ])
         self.count += 1
         return True

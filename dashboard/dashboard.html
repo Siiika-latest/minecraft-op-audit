@@ -14,6 +14,15 @@
   --item:#0b7285; --itemb:#e3f6f9;
   --misc:#607089; --miscb:#eef1f6;
   --accent:#2f6feb; --danger:#e03131;
+  --death:#c92a2a; --deathb:#ffe9e9;
+  /* 排行榜色阶（浅色主题下用深一点的同色系，保证白底可读） */
+  --t-gold:#8a6d1f;   --t-gold-bg:#f9f1da;
+  --t-pink:#c2185b;   --t-pink-bg:#fde7ef;
+  --t-orange:#c05621; --t-orange-bg:#fdeee2;
+  --t-purple:#6d28d9; --t-purple-bg:#f1eafe;
+  --t-blue:#1d4ed8;   --t-blue-bg:#e8eeff;
+  --t-green:#15803d;  --t-green-bg:#e6f6ea;
+  --t-gray:#5b6472;   --t-gray-bg:#eef1f6;
   --shadow:0 1px 2px rgba(16,24,40,.06),0 6px 18px rgba(16,24,40,.05);
 }
 @media (prefers-color-scheme: dark){
@@ -26,6 +35,15 @@
     --item:#63e6be; --itemb:#11302a;
     --misc:#94a3b8; --miscb:#232a34;
     --accent:#6ea8fe; --danger:#ff8787;
+    --death:#ff8787; --deathb:#3a1f1f;
+    /* 排行榜色阶（深色主题下用 FF14 Logs 的原味配色） */
+    --t-gold:#e5cc80;   --t-gold-bg:#3a3320;
+    --t-pink:#e268a8;   --t-pink-bg:#3a2030;
+    --t-orange:#ff8000; --t-orange-bg:#3a2712;
+    --t-purple:#a335ee; --t-purple-bg:#2b1a3d;
+    --t-blue:#4795f0;   --t-blue-bg:#152a44;
+    --t-green:#3fd63f;  --t-green-bg:#12301a;
+    --t-gray:#8a93a5;   --t-gray-bg:#232a34;
     --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.35);
   }
 }
@@ -50,7 +68,7 @@ button:hover,.btn:hover{border-color:var(--accent);color:var(--accent)}
 .tabs button.on{color:var(--accent);border-bottom:2px solid var(--accent);font-weight:600}
 .filters{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px;
   display:flex;gap:12px;flex-wrap:wrap;align-items:center;box-shadow:var(--shadow);margin-bottom:14px}
-.filters label{color:var(--fg3);font-size:12.5px;margin-right:4px}
+.filters label,.lbctl label{color:var(--fg3);font-size:12.5px;margin-right:4px}
 select,input[type=search]{font:inherit;background:var(--panel2);color:var(--fg);border:1px solid var(--line);
   border-radius:8px;padding:6px 9px;outline:none;min-width:120px}
 select:focus,input:focus{border-color:var(--accent)}
@@ -84,6 +102,7 @@ select:focus,input:focus{border-color:var(--accent)}
 .item .en{color:var(--fg3);font-size:12.5px}
 .cnt{font-weight:700;color:var(--give)}
 .detail{color:var(--fg2);font-size:13px;margin-top:2px;word-break:break-word}
+.msg{color:var(--fg3);font-size:12.5px;margin-top:2px;font-style:italic}
 .raw{margin-top:5px}
 .raw summary{color:var(--fg3);font-size:12px;cursor:pointer}
 .raw code{display:block;margin-top:5px;font-size:11.5px;color:var(--fg2);background:var(--panel2);
@@ -110,6 +129,45 @@ select:focus,input:focus{border-color:var(--accent)}
 .note{color:var(--fg3);font-size:12.5px;margin-top:18px;border-top:1px solid var(--line);padding-top:12px}
 .pill{display:inline-block;font-size:11.5px;color:var(--fg3);background:var(--panel2);
   border:1px solid var(--line);border-radius:999px;padding:2px 8px;margin-right:6px}
+.ev.death{border-left-color:var(--death)}
+.badge.death{background:var(--deathb);color:var(--death)}
+.killer{font-weight:600;color:var(--death)}
+/* ── 排行榜 ─────────────────────────────────────────────── */
+.lbctl{display:flex;gap:12px;flex-wrap:wrap;align-items:center;background:var(--panel);
+  border:1px solid var(--line);border-radius:12px;padding:12px;box-shadow:var(--shadow);margin-bottom:14px}
+.lbctl .hint{color:var(--fg3);font-size:12.5px;flex:1;min-width:220px}
+.lb{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start}
+@media(max-width:900px){.lb{grid-template-columns:1fr}}
+.lbcard{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden;box-shadow:var(--shadow)}
+.lbcard>.lh{display:flex;align-items:center;justify-content:space-between;gap:10px;
+  padding:11px 14px;border-bottom:1px solid var(--line)}
+.lbcard>.lh .ttl{font-weight:650}
+.lbcard>.lh .sub{color:var(--fg3);font-size:12px}
+.lbrow{display:grid;grid-template-columns:34px 1fr 78px 52px;gap:10px;align-items:center;
+  padding:8px 14px;border-bottom:1px solid var(--line)}
+.lbrow:last-child{border-bottom:0}
+.lbrow:hover{background:var(--panel2)}
+.lbrow .rk{color:var(--fg3);font-size:12.5px;font-variant-numeric:tabular-nums;text-align:right}
+.lbrow.first .rk{color:var(--t-gold);font-weight:700}
+.lbrow .nm{display:flex;align-items:center;gap:8px;min-width:0}
+.lbrow .nm .tx{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lbrow .vl{text-align:right;font-weight:650;font-variant-numeric:tabular-nums}
+.lbrow .vl i{font-style:normal;color:var(--fg3);font-size:11.5px;margin-left:2px}
+.tier{display:inline-block;min-width:44px;text-align:center;font-weight:700;font-size:12.5px;
+  font-variant-numeric:tabular-nums;border-radius:6px;padding:2px 7px;border:1px solid transparent}
+.t-gold{color:var(--t-gold);background:var(--t-gold-bg);border-color:var(--t-gold)}
+.t-pink{color:var(--t-pink);background:var(--t-pink-bg);border-color:var(--t-pink)}
+.t-orange{color:var(--t-orange);background:var(--t-orange-bg);border-color:var(--t-orange)}
+.t-purple{color:var(--t-purple);background:var(--t-purple-bg);border-color:var(--t-purple)}
+.t-blue{color:var(--t-blue);background:var(--t-blue-bg);border-color:var(--t-blue)}
+.t-green{color:var(--t-green);background:var(--t-green-bg);border-color:var(--t-green)}
+.t-gray{color:var(--t-gray);background:var(--t-gray-bg);border-color:var(--t-gray)}
+.lbempty{color:var(--fg3);text-align:center;padding:26px 10px;font-size:13px}
+.legend{margin-top:16px;background:var(--panel);border:1px solid var(--line);border-radius:12px;
+  padding:12px 14px;box-shadow:var(--shadow)}
+.legend .lg-t{font-weight:650;font-size:13px;margin-bottom:8px}
+.legend .lg-rows{display:flex;gap:10px;flex-wrap:wrap}
+.legend .lg-i{display:flex;align-items:center;gap:6px;color:var(--fg2);font-size:12.5px}
 </style>
 </head>
 <body>
@@ -129,6 +187,7 @@ select:focus,input:focus{border-color:var(--accent)}
   <section class="stats" id="stats"></section>
 
   <nav class="tabs">
+    <button data-view="leaderboard">排行榜</button>
     <button data-view="timeline" class="on">时间轴</button>
     <button data-view="players">玩家板块</button>
   </nav>
@@ -156,25 +215,36 @@ select:focus,input:focus{border-color:var(--accent)}
     <br/>
     <span class="pill">覆盖范围</span>给物品 <code>/give</code>、<code>/item replace</code>、<code>/loot</code>、游戏模式切换
     <code>/gamemode</code>、附魔 <code>/enchant</code>、药水 <code>/effect</code>、经验 <code>/xp</code>、
-    清背包 <code>/clear</code>、权限变更 <code>/op</code>、刷实体 <code>/summon</code>。
+    清背包 <code>/clear</code>、权限变更 <code>/op</code>、刷实体 <code>/summon</code>、玩家死亡。
+    <br/>
+    <span class="pill">排行榜</span>按<b>天</b>统计「管理行为次数」与「死亡次数」两榜，百分位配色参考 FF14 Logs：
+    最高为 <span class="tier t-gold">100</span> 金色、<span class="tier t-pink">99</span> 粉色、
+    <span class="tier t-orange">91–98</span> 橙色，依次为
+    <span class="tier t-purple">76–90</span> 紫色、<span class="tier t-blue">51–75</span> 蓝色、
+    <span class="tier t-green">26–50</span> 绿色、<span class="tier t-gray">1–25</span> 灰色。
     <br/>
     <span class="pill">说明</span>管理员在<b>创造模式物品栏</b>里直接拖拽拿物品不会产生任何命令，因此无法记录；
     这类行为只能通过「切换游戏模式」记录间接佐证。控制台 / 命令方块执行的命令，执行者记为 <code>console</code>。
+    死亡记录里鼠标悬停死因标签可看到原始 <code>msgId</code>（如 <code>inWall</code>），
+    它是与语言无关的结构化 id，不是猜日志文本得到的。
   </div>
 </div>
 
 <script>
 const K = new URLSearchParams(location.search).get('k') || '';
 const TYPES = [['give','管理员取物'],['gamemode','切换游戏模式'],['gamemode_other','切换他人模式'],
-               ['item_set','管理员设物'],['enchant','附魔'],['effect','药水'],['clear','清背包'],['give_failed','取物失败']];
-const state = {view:'timeline', days:'7', player:'', types:[], q:'', limit:800, data:null};
+               ['item_set','管理员设物'],['enchant','附魔'],['effect','药水'],['clear','清背包'],
+               ['death','玩家死亡'],['give_failed','取物失败']];
+const TIER_CN = {gold:'金色',pink:'粉色',orange:'橙色',purple:'紫色',blue:'蓝色',green:'绿色',gray:'灰色'};
+const state = {view:'timeline', days:'7', player:'', types:[], q:'', limit:800, lb:'', data:null};
 
 function esc(s){return (s==null?'':String(s)).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function colorOf(name){let h=0;for(const c of (name||'?'))h=(h*31+c.charCodeAt(0))>>>0;return 'hsl('+(h%360)+',52%,46%)';}
 function api(path){return path + (path.includes('?')?'&':'?') + 'k=' + encodeURIComponent(K);}
 
 async function load(){
-  const p = new URLSearchParams({days:state.days, player:state.player, types:state.types.join(','), q:state.q, limit:state.limit});
+  const p = new URLSearchParams({days:state.days, player:state.player, types:state.types.join(','),
+                                 q:state.q, limit:state.limit, lb:state.lb});
   const r = await fetch(api('/api/data?' + p.toString()));
   if(!r.ok){ document.getElementById('view').innerHTML =
       '<div class="empty">读取失败（HTTP ' + r.status + '）。'
@@ -194,6 +264,7 @@ function renderStats(){
   const d = state.data, s = d.stats || {};
   const items = [['筛选出事件', d.total_filtered], ['管理员取物', s.give||0],
                  ['切换游戏模式', (s.gamemode||0)+(s.gamemode_other||0)],
+                 ['玩家死亡', s.death||0],
                  ['涉及玩家', (d.players||[]).length], ['累计记录', d.total_all]];
   document.getElementById('stats').innerHTML = items.map(([k,v]) =>
     '<div class="stat"><div class="k">'+k+'</div><div class="v">'+v+'</div></div>').join('');
@@ -219,7 +290,8 @@ function renderTypes(){
 
 function evCard(e){
   const t = e.type, cn = (state.data.type_cn||{})[t] || t;
-  const item = (e.item_zh || e.item_en || e.item_raw)
+  const isDeath = (t === 'death');
+  const item = (!isDeath && (e.item_zh || e.item_en || e.item_raw))
     ? '<div class="item">'
       + '<span class="zh">' + esc(e.item_zh || e.item_en || e.item_raw) + '</span>'
       + (e.item_id ? '<span class="id">' + esc(e.item_id) + '</span>' : '')
@@ -227,19 +299,73 @@ function evCard(e){
       + (e.count ? '<span class="cnt">×' + e.count + '</span>' : '')
       + (e.item_id ? '' : '<span class="en">（未匹配到 ID）</span>')
       + '</div>' : '';
-  const who = (e.actor && e.target && e.actor !== e.target)
-    ? '<span class="who">' + esc(e.actor) + '</span><span class="arrow"> → </span><span class="who">' + esc(e.target) + '</span>'
-    : '<span class="who">' + esc(e.actor || e.target || '-') + '</span>';
-  const tgt = (e.target && e.actor === e.target) ? '' : (e.target ? '<span class="arrow">对象：</span>' + esc(e.target) : '');
+  const who = isDeath
+    ? '<span class="who">' + esc(e.actor || '-') + '</span>'
+      + (e.killer ? '<span class="arrow"> 被 </span><span class="killer">' + esc(e.killer)
+                    + '</span><span class="arrow"> 击杀</span>' : '')
+      + (e.cause_cn ? '<span class="pill" title="死因 id：' + esc(e.cause || '') + '">'
+                      + esc(e.cause_cn) + '</span>' : '')
+    : ((e.actor && e.target && e.actor !== e.target)
+        ? '<span class="who">' + esc(e.actor) + '</span><span class="arrow"> → </span><span class="who">' + esc(e.target) + '</span>'
+        : '<span class="who">' + esc(e.actor || e.target || '-') + '</span>');
+  const dm = (isDeath && e.msg) ? '<div class="msg">游戏内死讯：' + esc(e.msg) + '</div>' : '';
   return '<div class="ev ' + esc(t) + '">'
     + '<div class="t">' + esc((e.ts||'').slice(11)) + '</div>'
     + '<div class="body"><div class="l1">'
     + '<span class="badge ' + esc(t) + '">' + esc(cn) + '</span>' + who
     + (e._view ? '<span class="pill">' + esc(e._view) + '</span>' : '')
     + '</div>' + item
-    + '<div class="detail">' + esc(e.detail_cn || '') + '</div>'
+    + '<div class="detail">' + esc(e.detail_cn || '') + '</div>' + dm
     + '<details class="raw"><summary>原始日志</summary><code>' + esc(e.raw || '') + '</code></details>'
     + '</div></div>';
+}
+
+/* ── 排行榜（百分位配色参考 FF14 Logs）──────────────────── */
+function tierHtml(pct, tier){
+  return '<span class="tier t-' + esc(tier) + '" title="百分位 ' + pct + '（' + esc(TIER_CN[tier]||tier) + '）">'
+    + pct + '</span>';
+}
+
+function lbCard(title, rows, total, emptyText){
+  const head = '<div class="lh"><span class="ttl">' + esc(title) + '</span>'
+    + '<span class="sub">' + (rows.length ? rows.length + ' 人上榜 · 当日共 ' + total + ' 次' : '暂无数据') + '</span></div>';
+  const body = rows.length
+    ? rows.map((r,i) => '<div class="lbrow' + (i===0?' first':'') + '">'
+        + '<span class="rk">' + (i===0 ? '★' : r.rank) + '</span>'
+        + '<span class="nm"><span class="ava" style="background:' + colorOf(r.name) + '">'
+          + esc((r.name||'?').slice(0,1).toUpperCase()) + '</span>'
+          + '<span class="tx">' + esc(r.name) + '</span></span>'
+        + '<span class="vl">' + r.value + '<i>次</i></span>'
+        + tierHtml(r.pct, r.tier)
+        + '</div>').join('')
+    : '<div class="lbempty">' + esc(emptyText) + '</div>';
+  return '<div class="lbcard">' + head + body + '</div>';
+}
+
+function tierLegend(){
+  const lb = state.data.leaderboard || {};
+  const items = (lb.tiers||[]).map(t => {
+    const label = t.lo === t.hi ? String(t.lo) : (t.lo + '–' + t.hi);
+    return '<span class="lg-i"><span class="tier t-' + esc(t.key) + '">' + label + '</span>'
+      + esc(TIER_CN[t.key]||t.key) + '</span>';
+  }).join('');
+  return '<div class="legend"><div class="lg-t">百分位色阶</div><div class="lg-rows">' + items + '</div></div>';
+}
+
+function renderLeaderboard(){
+  const lb = state.data.leaderboard || {admin:[],death:[],days:[],date:''};
+  if(!(lb.days||[]).length)
+    return '<div class="empty">暂无数据。<br/>服务端开服后，玩家执行管理命令或死亡即会自动上榜。</div>';
+  const opts = (lb.days||[]).map(d => '<option value="'+esc(d)+'"'+(d===lb.date?' selected':'')+'>'
+    + esc(d) + '</option>').join('');
+  return '<div class="lbctl">'
+    + '<div><label>统计日期</label><select id="lbday">' + opts + '</select></div>'
+    + '<div class="hint">百分位 = 当天「你胜过或战平的人数」占上榜玩家的比例，最高为 100；并列者同色，'
+    + '次数为 0 的玩家不上榜。榜单只按日期统计，不受上方筛选条件影响。</div></div>'
+    + '<div class="lb">'
+    + lbCard('管理员行为榜', lb.admin||[], lb.admin_total||0, '当日没有人执行管理命令')
+    + lbCard('死亡次数榜', lb.death||[], lb.death_total||0, '当日没有人死亡')
+    + '</div>' + tierLegend();
 }
 
 function renderTimeline(){
@@ -262,13 +388,24 @@ function renderPlayers(){
   const items = {};
   mine.forEach(e => { const k = e.item_zh || e.item_en || ''; if(k) items[k] = (items[k]||0) + (e.count||1); });
   const top = Object.entries(items).sort((a,b)=>b[1]-a[1]).slice(0,6);
+  // 该玩家在「最近一天」榜单上的百分位（榜单按日期统计，与当前筛选无关）
+  const lb = state.data.leaderboard || {};
+  const ar = (lb.admin||[]).find(r => r.name === me.name);
+  const dr = (lb.death||[]).find(r => r.name === me.name);
+  const lbTag = (ar || dr)
+    ? '<span class="tag">' + esc((lb.date||'').slice(5)) + ' 榜单 '
+      + (ar ? '管理 ' + tierHtml(ar.pct, ar.tier) : '')
+      + (dr ? ' 死亡 ' + tierHtml(dr.pct, dr.tier) : '') + '</span>'
+    : '';
   return '<div class="layout"><div class="plist"><div class="ph">玩家（按记录数排序）</div>'
     + ps.map(p => '<div class="pitem' + (p.name===me.name?' on':'') + '" data-p="' + esc(p.name) + '">'
         + '<span class="ava" style="background:' + colorOf(p.name) + '">' + esc(p.name.slice(0,1).toUpperCase()) + '</span>'
         + '<span class="nm">' + esc(p.name) + '</span><span class="ct">' + p.count + '</span></div>').join('')
     + '</div><div><div class="phead"><div class="nm">' + esc(me.name) + '</div>'
-    + '<div class="meta">作为执行者 ' + (me.as_actor||0) + ' 次 · 作为对象 ' + (me.as_target||0) + ' 次 · 最近 ' + esc(me.last||'-') + '</div>'
+    + '<div class="meta">作为执行者 ' + (me.as_actor||0) + ' 次 · 作为对象 ' + (me.as_target||0)
+    + ' 次 · 死亡 ' + (me.deaths||0) + ' 次 · 最近 ' + esc(me.last||'-') + '</div>'
     + '<div class="tags"><span class="tag">取物 ' + (me.give||0) + '</span><span class="tag">模式切换 ' + (me.gamemode||0) + '</span>'
+    + '<span class="tag">死亡 ' + (me.deaths||0) + '</span>' + lbTag
     + top.map(([k,v]) => '<span class="tag">' + esc(k) + ' ×' + v + '</span>').join('') + '</div></div>'
     + (mine.length ? mine.map(evCard).join('') : '<div class="empty">该玩家暂无记录</div>')
     + '</div></div>';
@@ -276,7 +413,16 @@ function renderPlayers(){
 
 function renderView(){
   document.querySelectorAll('.pitem').forEach(el => el.onclick = () => { state.player = el.dataset.p; load(); });
-  document.getElementById('view').innerHTML = state.view === 'timeline' ? renderTimeline() : renderPlayers();
+  const v = state.view;
+  // 排行榜是按日期统计的，与顶部的天数/玩家/类型筛选无关，故隐藏筛选栏避免误解
+  const f = document.querySelector('.filters');
+  if(f) f.style.display = (v === 'leaderboard') ? 'none' : '';
+  document.getElementById('view').innerHTML =
+      v === 'timeline' ? renderTimeline()
+    : v === 'players'  ? renderPlayers()
+    : renderLeaderboard();
+  const lbd = document.getElementById('lbday');
+  if(lbd) lbd.onchange = e => { state.lb = e.target.value; load(); };
 }
 
 document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {

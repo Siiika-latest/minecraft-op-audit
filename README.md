@@ -1,19 +1,21 @@
 # minecraft-op-audit · Minecraft 管理员行为审计
-# 为什么不能叫Minecraft logs呢（）
-**一条命令装好的旁路审计系统**：记录每位玩家（尤其是 OP）执行了哪些管理命令 —— 给谁发了什么物品、把谁切成了创造模式、开了谁的权限 —— 并以 **时间轴** 和 **玩家板块** 两种视图呈现。
+
+**一条命令装好的旁路审计系统**：记录每位玩家（尤其是 OP）执行了哪些管理命令 —— 给谁发了什么物品、把谁切成了创造模式、开了谁的权限 —— 并统计每位玩家的**死亡次数**，以 **排行榜**、**时间轴**、**玩家板块** 三种视图呈现。
+
+排行榜按天出榜，百分位配色参考 **FF14 Logs**：最高 <span>100</span> 金色、99 粉色、91–98 橙色……
 
 > 完全旁路：不改动服务端本体、不修改存档、不引入新的权限体系。
 > 全部写入都发生在服务端目录之外，唯一例外是一个可随时删除的 KubeJS 脚本。
 
 ```
-时间轴                                        玩家板块
+排行榜（2026-09-19）                          时间轴
 ──────────────────────────────               ──────────────────────────────
-▸ 2026-09-17（12 条）                        ┌ 玩家列表 ─┬ Alice 的完整行为 ─┐
-  12:04:11 [管理员取物] Alice → Steve        │ Alice  12 │ 作为执行者 9 次   │
-           钻石 ×64  (Diamond)               │ Bob     7 │ 作为对象 3 次     │
-           minecraft:diamond                 │ Carol   5 │ 取物 7 · 切模式 2 │
-  12:03:52 [切换游戏模式] Alice               │ console 3 │ 高频：钻石 ×128   │
-           把自己的游戏模式切为 creative       └───────────┴───────────────────┘
+管理员行为榜              死亡次数榜          ▸ 2026-09-17（12 条）
+★ Alice    6 次  [ 100 ]  Bob    5 次 [ 100 ]  12:04:11 [管理员取物] Alice → Steve
+  Bob      3 次  [  67 ]  Alice  2 次 [  67 ]           钻石 ×64  (Diamond)
+  Carol    1 次  [  33 ]  Carol  1 次 [  33 ]            minecraft:diamond
+                          （越靠左越高，色阶见下） 12:03:20 [玩家死亡] oMoSiKa
+                                                    被 Zombie 击杀（死因：被生物击杀）
 ```
 
 ---
@@ -24,6 +26,7 @@
 - [工作原理](#工作原理)
 - [快速开始](#快速开始)
 - [看板使用](#看板使用)
+- [排行榜与色阶](#排行榜与色阶)
 - [记录哪些行为](#记录哪些行为)
 - [台账文件](#台账文件)
 - [配置项](#配置项)
@@ -59,8 +62,11 @@ Minecraft 里 OP 的权力很大，但**原版几乎没有留下可查的记录*
 ┌─────────────── Minecraft 服务端（本体零改动）──────────────────┐
 │                                                                │
 │  kubejs/server_scripts/admin_audit.js                          │
-│   └─ 监听 ServerEvents.command（每条命令执行时触发）             │
-│        输出一行：  [MCAUDIT] {"ms":..,"actor":..,"cmd":..,"gm":..}
+│   ├─ ServerEvents.command  每条命令执行时触发                    │
+│   │      → [MCAUDIT] {"ev":"cmd","ms":..,"actor":..,"cmd":..}   │
+│   └─ EntityEvents.death    每次生物死亡时触发，仅玩家会上报       │
+│          → [MCAUDIT] {"ev":"death","actor":..,"cause":"fall",   │
+│                       "killer":"Zombie",..}                     │
 │                            │                                   │
 │                            ▼                                   │
 │                    logs/latest.log                             │
@@ -69,14 +75,16 @@ Minecraft 里 OP 的权力很大，但**原版几乎没有留下可查的记录*
                              ▼
       ┌────────────────────────────────────────────────┐
       │  audit_watcher.py    采集器（systemd 常驻）      │
-      │   ├─ 解析命令 → 事件类型 give / gamemode / ...   │
+      │   ├─ 命令 → 事件类型 give / gamemode / ...       │
+      │   ├─ 死亡 → 死因中文化 + 击杀者                  │
       │   ├─ 物品 id → 中英文名（item_names.json）       │
       │   └─ 落盘 events.csv + events-YYYY-MM-DD.jsonl  │
       └───────────────────────┬────────────────────────┘
                               ▼
       ┌────────────────────────────────────────────────┐
       │  audit_dashboard.py   看板（systemd 常驻）      │
-      │   时间轴视图  ·  玩家板块视图                    │
+      │   排行榜视图  ·  时间轴视图  ·  玩家板块视图      │
+      │   百分位色阶参考 FF14 Logs                       │
       │   纯 Python 标准库，零第三方依赖                 │
       └────────────────────────────────────────────────┘
 ```
@@ -152,10 +160,11 @@ sudo bash deploy/uninstall.sh --purge    # 连台账一起删除
 
 | 视图 | 说明 |
 |---|---|
-| **时间轴** | 按日期分组的事件流。每条显示类型徽章、执行者 → 对象、物品（中文名 + ID + 英文名 + 数量），可展开原始日志行 |
-| **玩家板块** | 左侧玩家列表（按记录数排序），点选任一玩家即查看**他的全部行为**，顶部带概览：作为执行者 N 次 / 作为对象 N 次 / 最近时间 / 取物 N / 模式切换 N / 高频物品 |
+| **排行榜** | 按天出两张榜：**管理员行为榜** 与 **死亡次数榜**。每行显示名次、玩家、次数与百分位徽章（配色参考 FF14 Logs），可切换统计日期 |
+| **时间轴** | 按日期分组的事件流。每条显示类型徽章、执行者 → 对象、物品（中文名 + ID + 英文名 + 数量），可展开原始日志行；死亡事件显示击杀者与游戏内死讯原文 |
+| **玩家板块** | 左侧玩家列表（按记录数排序），点选任一玩家即查看**他的全部行为**，顶部带概览：作为执行者 N 次 / 作为对象 N 次 / 死亡 N 次 / 最近时间 / 取物 N / 模式切换 N / 该玩家当日榜单百分位 |
 
-筛选条件：**天数**（今天 / 3 天 / 7 天 / 30 天 / 全部）、**指定玩家**、**事件类型**标签、**关键词搜索**。
+筛选条件（排行榜视图下自动隐藏，因为榜单只按日期统计）：**天数**（今天 / 3 天 / 7 天 / 30 天 / 全部）、**指定玩家**、**事件类型**标签、**关键词搜索**。
 
 下载：
 
@@ -163,6 +172,54 @@ sudo bash deploy/uninstall.sh --purge    # 连台账一起删除
 |---|---|
 | `/download/events.csv` | 全量台账，Excel 可直接打开（UTF-8 BOM，中文不乱码） |
 | `/download/events-YYYY-MM-DD.jsonl` | 按天明细，看板的数据源 |
+
+---
+
+## 排行榜与色阶
+
+榜单按**天**统计，每天两张：
+
+| 榜单 | 统计口径 |
+|---|---|
+| **管理员行为榜** | 当天该玩家作为**执行者**产生的管理事件数（取物 / 设物 / 切模式 / 附魔 / 药水 / 经验 / 清背包 / 权限变更 / 刷实体 / 掉落物） |
+| **死亡次数榜** | 当天该玩家**死亡**的次数 |
+
+### 百分位怎么算
+
+```
+百分位 = 100 × 当天「次数 ≤ 你的玩家数」 ÷ 当天上榜玩家数      （四舍五入，最小 1）
+```
+
+也就是「**你胜过或战平了多少比例的人**」。因此：
+
+- **当天次数最高的玩家必定是 100**（并列第一则同为 100）
+- 并列者拿到相同的百分位与颜色
+- **次数为 0 的玩家不上榜**（否则一堆 0 分并列，榜单没有信息量）
+- `console`（控制台）不是玩家，不进榜
+
+举例，当天 3 人上榜，次数分别为 `5 / 3 / 1`：
+
+| 玩家 | 次数 | 胜过或战平 | 百分位 | 色阶 |
+|---|---|---|---|---|
+| Alice | 5 | 3 / 3 | `100` | 金色 |
+| Bob | 3 | 2 / 3 | `67` | 蓝色 |
+| Carol | 1 | 1 / 3 | `33` | 绿色 |
+
+### 色阶
+
+| 百分位 | 颜色 | 含义 |
+|---|---|---|
+| `100` | 金色 | 当日第一 |
+| `99` | 粉色 | 仅次于第一 |
+| `91 – 98` | 橙色 | 顶尖 |
+| `76 – 90` | 紫色 | 优秀 |
+| `51 – 75` | 蓝色 | 中上 |
+| `26 – 50` | 绿色 | 中下 |
+| `1 – 25` | 灰色 | 垫底 |
+
+配色沿用 FF14 Logs 的观感（深色主题下直接用原味配色；浅色主题下换成同色系深色版，保证白底可读）。
+
+> 这个百分位是**队内相对排名**，不是绝对评价 —— 人少的时候排到 100 只是因为当天只有你在动。跨天比没意义，同一天横着比才有意义。
 
 ---
 
@@ -181,8 +238,53 @@ sudo bash deploy/uninstall.sh --purge    # 连台账一起删除
 | `/clear [玩家]` | `clear` | 清空玩家物品 |
 | `/op`、`/deop <玩家>` | `op` | 权限变更 |
 | `/summon <实体>` | `summon` | 管理员刷实体 |
+| （玩家死亡，非命令） | `death` | 玩家死亡（记录死因与击杀者） |
 
 `time` / `weather` / `say` 这类噪声**默认不记录**。若想把所有命令都记进台账，把 `config.json` 的 `log_other_commands` 改成 `true`。
+
+### 死亡统计是怎么来的
+
+死亡**不是**从日志文本里猜的 —— 服务端日志里的死讯是本地化文本（可能是中文、可能是英文、可能被模组改掉），拿它做匹配非常脆。
+
+采集端改为监听 KubeJS 的 `EntityEvents.death`，只取与语言无关的结构化字段：
+
+| 字段 | 来源 | 例子 |
+|---|---|---|
+| 死者 | 事件实体 | `oMoSiKa` |
+| 死因 | `DamageSource.type().msgId()` | `fall` → 坠落、`player` → 被玩家击杀、`mob` → 被生物击杀 |
+| 击杀者 | `DamageSource.getActual()` | `Zombie`、`Alex`（射箭的箭会正确回溯到射手） |
+| 游戏内死讯 | `CombatTracker.getDeathMessage()` | `oMoSiKa was slain by Zombie`（原文保留，供对照） |
+
+`EntityEvents.death` 对**所有生物**都触发（刷怪塔每秒可能死几百只怪），所以处理器第一件事就是判断"是不是玩家"，不是玩家直接返回，不产生任何日志、不写台账。
+
+#### ⚠ 三个实测踩过的坑（别照 API 文档想当然）
+
+上面两个取值方法**不是** `DamageSource` 上最直觉的那两个 —— 直觉写法在这套环境里会静默变成空字符串：
+
+| 直觉写法 | 实际结果 | 改用 |
+|---|---|---|
+| `getSource().getMsgId()` | `TypeError: Cannot find function getMsgId ...`（方法不存在） | `getSource().type().msgId()`，兜底从 `String(getSource())` 里抠 `"DamageSource (lava)"` |
+| `getSource().getEntity()` / `.getDirectEntity()` | 方法不存在 | `getSource().getActual()`（箭 → 射箭的人），`getImmediate()` 兜底 |
+| `getSource().getLocalizedDeathMessage()` | `InternalError: Can't find method ...DamageSource.m_6157_()`（SRG 映射缺失） | `entity.getCombatTracker().getDeathMessage()` |
+
+实测环境：Minecraft 1.20.1 + Forge + KubeJS 6（Rhino 引擎）。这段结论写在 `kubejs/admin_audit.js` 顶部的兼容性注释里，换版本请先复测。
+
+#### 死因 id 不是注册名
+
+另一个容易踩的坑：`DamageType.msgId()` 返回的是**驼峰**短名，和伤害类型的注册名并不一致。下表是 2026-09-17 在真实服务端用 `/damage` 逐个 dump 出来的，不是猜的：
+
+| 注册名（`/damage` 里写的） | 实际 `msgId()` | 中文 |
+|---|---|---|
+| `player_attack` | `player` | 被玩家击杀 |
+| `mob_attack` | `mob` | 被生物击杀 |
+| `in_wall` | `inWall` | 卡在方块里 |
+| `out_of_world` | `outOfWorld` | 掉出世界 |
+| `lightning_bolt` | `lightningBolt` | 被雷劈 |
+| `hot_floor` | `hotFloor` | 踩到岩浆块 |
+| `generic_kill` | `genericKill` | 被清除 |
+| `fall` / `lava` / `drown` / `cactus` / `wither` / `freeze` / `arrow` / `trident` / `explosion` | 同名 | 坠落 / 岩浆 / 溺水 / 仙人掌 / 凋零 / 冻死 / 被箭射死 / 被三叉戟戳死 / 爆炸 |
+
+死因 id 的中文映射表在 `collector/audit_watcher.py` 的 `CAUSE_CN`。查表前会先用 `cause_key()` 把驼峰转成蛇形，所以 `inWall` 和 `in_wall` 都能命中同一张表。未收录的模组伤害类型会原样显示（例如 `some_mod:weird_damage`），不会丢失信息；想补充就在那个字典里加一行。
 
 其他行为：
 
@@ -275,10 +377,10 @@ sudo bash deploy/uninstall.sh --purge    # 连台账一起删除
 ## 开发与测试
 
 ```bash
-# 采集器解析逻辑（32 项）
+# 采集器解析逻辑（63 项：命令 / 死亡事件 / 死因 id 归一化 / 时间换算 / 选择器处理）
 python3 tests/test_watcher.py
 
-# 看板鉴权 + 数据聚合（39 项）
+# 看板鉴权 + 数据聚合 + 排行榜百分位（83 项）
 python3 tests/test_dashboard.py
 ```
 
@@ -333,9 +435,10 @@ minecraft-op-audit/
 
 ## English
 
-**minecraft-op-audit** — a sidecar audit system for Minecraft servers that records every administrative command (who gave what to whom, who switched gamemodes, who granted OP) and serves it through a web dashboard with a timeline view and a per-player view.
+**minecraft-op-audit** — a sidecar audit system for Minecraft servers that records every administrative command (who gave what to whom, who switched gamemodes, who granted OP) plus **every player death**, and serves it through a web dashboard with a **daily leaderboard**, a timeline view and a per-player view.
 
-- **Zero changes to the server itself.** A single KubeJS script emits one `[MCAUDIT]` log line per command; a Python collector tails `logs/latest.log` and writes CSV/JSONL ledgers; a dependency-free Python dashboard renders them.
+- **Zero changes to the server itself.** A single KubeJS script emits one `[MCAUDIT]` log line per command and per player death; a Python collector tails `logs/latest.log` and writes CSV/JSONL ledgers; a dependency-free Python dashboard renders them.
+- **Leaderboard percentiles** follow the FF14 Logs colour scheme: `100` gold, `99` pink, `91–98` orange, `76–90` purple, `51–75` blue, `26–50` green, `1–25` grey. The daily top scorer always gets 100; ties share a percentile; players with zero are not ranked.
 - **Requires** Minecraft Java + KubeJS 6 on the server, and Python 3.9+ for the collector.
 - **Install**: `git clone … && cd minecraft-op-audit && sudo bash deploy/install.sh`
 

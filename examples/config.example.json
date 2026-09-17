@@ -15,7 +15,8 @@
     "effect",
     "xp",
     "op",
-    "summon"
+    "summon",
+    "death"
   ],
   "log_other_commands": false,
 

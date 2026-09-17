@@ -34,8 +34,91 @@ TYPE_CN = {
     "loot": "管理员掉落物", "gamemode": "切换游戏模式", "gamemode_other": "切换他人模式",
     "enchant": "管理员附魔", "effect": "管理员给药水", "xp": "管理员给经验",
     "op": "权限变更", "summon": "管理员刷实体", "clear": "清空玩家物品",
-    "other": "其它命令", "raw_cmd": "命令原文",
+    "death": "玩家死亡", "other": "其它命令", "raw_cmd": "命令原文",
 }
+
+# ---------------- 排行榜 / 百分位（参考 FF14 Logs 的配色分档） ----------------
+# 百分位 = 「你胜过或战平的人」占当天上榜玩家的比例（四舍五入）。
+# 因此当天数值最高的人必定拿到 100，并列者同色。
+TIER_TABLE = [
+    (100, 100, "gold"),      # 金色
+    (99,   99, "pink"),      # 粉色
+    (91,   98, "orange"),    # 橙色
+    (76,   90, "purple"),    # 紫色
+    (51,   75, "blue"),      # 蓝色
+    (26,   50, "green"),     # 绿色
+    (1,    25, "gray"),      # 灰色
+]
+
+
+def tier_of(pct):
+    """百分位 → 色阶 key"""
+    for lo, hi, key in TIER_TABLE:
+        if lo <= pct <= hi:
+            return key
+    return "gray"
+
+
+def clean_name(name):
+    """过滤掉选择器、坐标、实体计数这类会被误当成玩家的字符串"""
+    n = (name or "").strip()
+    if (not n or n.startswith("@") or n == "unknown-player"
+            or n.endswith(" players") or n.startswith("坐标") or n.endswith("entities")):
+        return ""
+    return n
+
+
+# 排行榜只排玩家：控制台 / 未知来源不是人，不该跟玩家比高低
+NON_PLAYERS = {"console", "unknown-player", "server", "Server", "CONSOLE"}
+
+
+def percentile_rows(counter):
+    """{玩家: 次数} → 带名次与百分位的排行行（只列次数 > 0 的玩家）"""
+    vals = [v for v in counter.values() if v > 0]
+    n = len(vals)
+    if not n:
+        return []
+    rows = []
+    for name, v in counter.items():
+        if v <= 0:
+            continue
+        le = sum(1 for x in vals if x <= v)          # 胜过或战平的人数
+        pct = max(1, min(100, round(100.0 * le / n)))
+        rows.append({"name": name, "value": v, "pct": pct, "tier": tier_of(pct)})
+    rows.sort(key=lambda r: (-r["value"], r["name"]))
+    for i, r in enumerate(rows, 1):
+        r["rank"] = i
+    return rows
+
+
+def build_leaderboard(evs, day=""):
+    """按「天」出榜：管理行为次数榜 + 死亡次数榜。
+
+    刻意不受页面上的 天数/玩家/类型 筛选影响 —— 榜单要能横着比。
+    """
+    days = sorted({e.get("date_bj", "") for e in evs if e.get("date_bj")})
+    date = day if day in days else (days[-1] if days else "")
+    admin, death = {}, {}
+    for e in evs:
+        if e.get("date_bj") != date:
+            continue
+        actor = clean_name(e.get("actor", ""))
+        if not actor or actor in NON_PLAYERS:
+            continue
+        if e.get("type") == "death":
+            death[actor] = death.get(actor, 0) + 1
+        else:
+            admin[actor] = admin.get(actor, 0) + 1
+    a_rows, d_rows = percentile_rows(admin), percentile_rows(death)
+    return {
+        "date": date,
+        "days": days,
+        "admin": a_rows,
+        "death": d_rows,
+        "admin_total": sum(admin.values()),
+        "death_total": sum(death.values()),
+        "tiers": [{"lo": lo, "hi": hi, "key": k} for lo, hi, k in TIER_TABLE],
+    }
 
 # 与采集器保持一致的台账表头（台账为空时用于下载占位）
 CSV_HEADER = ["时间(北京)", "日期", "事件类型", "执行者", "执行者模式", "对象玩家",
@@ -124,25 +207,29 @@ def build_payload(q, conf):
     # 玩家聚合基于全量数据，不受筛选影响，便于对照
     all_players = {}
     for e in evs:
-        # 同一条事件中「自己给自己」的情况（如 /give Alice ... @s）：
-        # as_actor / as_target 各记一次，但事件数 count 只能记一次，否则会翻倍
-        counted = set()
-        for role, name in (("actor", e.get("actor", "")), ("target", e.get("target", ""))):
-            # 过滤掉选择器（@a/@s/@p）、坐标与实体计数这类非玩家串
-            if (not name or name.startswith("@") or name == "unknown-player"
-                    or name.endswith(" players") or name.startswith("坐标")
-                    or name.endswith("entities")):
-                continue
+        t = e.get("type")
+        actor = clean_name(e.get("actor", ""))
+        target = clean_name(e.get("target", ""))
+        # 同一条事件中「自己给自己」（如 /give Alice ... @s）：
+        # 这个人既算执行者也算对象，但事件数 count 只能记一次，否则会翻倍
+        involved = [n for n in dict.fromkeys([actor, target]) if n]
+        if not involved:
+            continue
+        for name in involved:
             d = all_players.setdefault(name, {"name": name, "count": 0, "give": 0, "gamemode": 0,
-                                              "last": "", "as_actor": 0, "as_target": 0})
-            d["as_" + role] = d.get("as_" + role, 0) + 1
-            if name in counted:
-                continue
-            counted.add(name)
+                                              "deaths": 0, "last": "",
+                                              "as_actor": 0, "as_target": 0})
             d["count"] += 1
-            if e.get("type") == "give":
+            if name == actor:
+                if t == "death":
+                    d["deaths"] += 1          # 死亡单独计数，不并入「作为执行者」
+                else:
+                    d["as_actor"] += 1
+            if name == target:
+                d["as_target"] += 1
+            if t == "give":
                 d["give"] += 1
-            if e.get("type") in ("gamemode", "gamemode_other"):
+            if t in ("gamemode", "gamemode_other"):
                 d["gamemode"] += 1
             if e.get("ts", "") > d["last"]:
                 d["last"] = e.get("ts", "")
@@ -183,6 +270,7 @@ def build_payload(q, conf):
         "shown": len(shown),
         "events": shown,
         "players": sorted(all_players.values(), key=lambda x: (-x["count"], x["name"])),
+        "leaderboard": build_leaderboard(evs, (q.get("lb", [""])[0] or "").strip()),
         "stats": stats,
         "top_items": sorted(items.items(), key=lambda x: -x[1])[:20],
         "type_cn": TYPE_CN,

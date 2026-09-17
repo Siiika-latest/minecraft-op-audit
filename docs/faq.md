@@ -88,10 +88,73 @@ systemctl restart minecraft-op-audit-collector
 不会。
 
 - **采集端**在最热路径上的开销是：拼一个字符串 + 一次日志输出，微秒级，且不涉及磁盘 I/O 之外的操作
+- **死亡事件**对所有生物触发，但第一行就判断"是不是玩家"，非玩家死亡只多一次 `instanceof`，
+  不产生日志。刷怪塔那种每秒几百只怪的场景也扛得住
 - **采集器**每 2 秒读一次日志的增量部分，只做字符串正则与本地文件追加写
 - 看板的数据在内存里缓存，文件没变就不重新解析
 
 服务端不开服时采集器几乎不消耗资源。
+
+## 死亡记录为什么只有玩家，没有生物
+
+这是刻意的。`EntityEvents.death` 一视同仁地覆盖所有生物，但把刷怪塔的鸡和玩家的死亡
+混在一个台账里，榜单就废了 —— 所以采集端在最前面就把非玩家实体过滤掉了。
+
+如果你确实想要全生物死亡流水，把 `kubejs/admin_audit.js` 里死亡处理器开头的
+
+```js
+if (!pd) { return }        // 不是玩家 → 直接放过
+```
+
+去掉即可。但注意：**玩家榜会因此被僵尸、骷髅之类的名字污染**，还需要同步调整
+`collector/audit_watcher.py` 的判断与看板的 `clean_name` 过滤。
+
+## 排行榜的百分位是怎么算的 / 为什么我是灰色
+
+```
+百分位 = 100 × 当天「次数 ≤ 你的玩家数」 ÷ 当天上榜玩家数
+```
+
+也就是「**你胜过或战平了多少比例的人**」。当天次数最高的人一定是 100。
+
+排查"为什么排名不好看"时按顺序看：
+
+1. **当天是不是只有你一个人上线** —— 人少的时候第一就是 100，垫底也可能就是 0
+2. **看的是不是同一天** —— 榜单切换日期在排行榜视图左上角，默认是**最近有数据的一天**，
+   不一定是今天
+3. **次数是不是 0** —— 次数为 0 的玩家不上榜（既不显示金色也不显示灰色，而是根本不出现）
+4. **你用的是不是控制台 / 命令方块** —— `console` 不是一个玩家，永远不进榜
+
+色阶：`100` 金 · `99` 粉 · `91–98` 橙 · `76–90` 紫 · `51–75` 蓝 · `26–50` 绿 · `1–25` 灰。
+
+> 这个数字是**当天服务器内的相对排名**，不是绝对评价。人少的时候排到 100 只是因为当天只有你在动，
+> 跨天比较没有意义。
+
+## 死亡时间不准 / 死因显示成英文 id / 死因全是"未知"
+
+- **时间**：优先用事件自带的 epoch 毫秒（KubeJS 侧 `new Date().getTime()`），
+  它缺失时才退回日志行时间戳，再退回采集时刻。若时间整体偏移，
+  检查 `config.json` 的 `log_tz` 是否与服务端日志时区一致。
+- **死因变成英文 id**（如 `some_mod:weird_damage`）：说明这个伤害类型不在
+  `collector/audit_watcher.py` 的 `CAUSE_CN` 字典里。字典收录了 50 多个原版死因，
+  模组新增的伤害类型会原样显示（这样不会丢信息）。想中文化就照格式加一行，
+  重启采集器即可。注意要照**实测的 msgId** 写，它和 `/damage` 里的注册名不一样
+  （如 `player_attack` 的 msgId 是 `player`）。
+- **死因全是"未知"、击杀者也全空**：这是 `kubejs/admin_audit.js` 里的死因取值
+  在你这版 KubeJS 上失效了。脚本里那三处调用（`type().msgId()` / `getActual()` /
+  `getCombatTracker().getDeathMessage()`）外面都套了 `try/catch`，
+  **失效时不会报错，只会静默留空**。用下面的办法复测：
+
+  ```bash
+  # 造一只僵尸并当场击杀，观察是否出现带 cause 的 [MCAUDIT] 行
+  # （把命令注入服务端控制台；记得先给目标位置 forceload，否则实体会被卸载）
+  execute positioned 0 250 0 summon minecraft:zombie run damage @s 1000 minecraft:player_attack by @s
+  grep -a '\[MCAUDIT\]' logs/latest.log | grep 'ev..:.death' | tail -3
+  ```
+
+  注意 `EntityEvents.death` 只对**玩家**上报，所以上面这条测法需要把脚本里的
+  `if (!pd) { return }` 临时改成 `if (!pd) { pd = event.getEntity() }` 再测 ——
+  改完记得改回来，然后 `kubejs reload server_scripts`。
 
 ## 玩家能看到或篡改审计数据吗
 
@@ -143,6 +206,13 @@ systemctl restart minecraft-op-audit-collector minecraft-op-audit-dashboard
 ```json
 { "enabled_types": ["give", "gamemode", "gamemode_other", "op"] }
 ```
+
+可用的类型名：`give` `give_failed` `item_set` `loot` `gamemode` `gamemode_other`
+`enchant` `effect` `xp` `op` `summon` `clear` `death`。
+
+**不想要死亡统计**就把 `death` 从中删掉 —— 采集端仍会上报（KubeJS 侧不停），
+但采集器会直接丢弃，台账里不会出现。想连上报都省掉，
+就把 `kubejs/admin_audit.js` 里整个 `EntityEvents.death` 处理器删掉。
 
 反过来，想把**所有**命令都记进台账（不推荐，噪音大）：
 
