@@ -1,0 +1,17 @@
+# 统一使用 LF 换行。
+# 本项目包含 shell 脚本与 Python 程序，若被 Windows 的 CRLF 污染，
+# 在 Linux 上会出现 “/bin/bash^M: bad interpreter” 而无法执行。
+* text=auto eol=lf
+
+*.sh    text eol=lf
+*.py    text eol=lf
+*.js    text eol=lf
+*.html  text eol=lf
+*.json  text eol=lf
+*.md    text eol=lf
+
+# 二进制
+*.png   binary
+*.jpg   binary
+*.jar   binary
+*.zip   binary

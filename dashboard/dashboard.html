@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Minecraft 管理员行为审计</title>
+<style>
+:root{
+  --bg:#f4f5f7; --panel:#ffffff; --panel2:#fafbfc; --line:#e3e6eb;
+  --fg:#1a1e26; --fg2:#586071; --fg3:#8b93a1;
+  --give:#e8590c; --giveb:#fff1e6;
+  --gm:#3b5bdb; --gmb:#e7ecff;
+  --gm2:#7048e8; --gm2b:#f0eaff;
+  --item:#0b7285; --itemb:#e3f6f9;
+  --misc:#607089; --miscb:#eef1f6;
+  --accent:#2f6feb; --danger:#e03131;
+  --shadow:0 1px 2px rgba(16,24,40,.06),0 6px 18px rgba(16,24,40,.05);
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#12151a; --panel:#1a1e25; --panel2:#20252e; --line:#2a303a;
+    --fg:#e9edf3; --fg2:#a6b1c0; --fg3:#78849a;
+    --give:#ffa94d; --giveb:#3a2411;
+    --gm:#8da2ff; --gmb:#1b2244;
+    --gm2:#b197fc; --gm2b:#2a2144;
+    --item:#63e6be; --itemb:#11302a;
+    --misc:#94a3b8; --miscb:#232a34;
+    --accent:#6ea8fe; --danger:#ff8787;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.35);
+  }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;}
+a{color:var(--accent)}
+.wrap{max-width:1180px;margin:0 auto;padding:20px 16px 60px}
+header.top{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+h1{margin:0;font-size:20px;letter-spacing:.3px}
+.sub{color:var(--fg3);font-size:12.5px;margin-top:4px}
+.actions{display:flex;gap:8px;flex-wrap:wrap}
+button,.btn{font:inherit;cursor:pointer;border:1px solid var(--line);background:var(--panel);
+  color:var(--fg);border-radius:8px;padding:7px 12px;text-decoration:none;display:inline-block}
+button:hover,.btn:hover{border-color:var(--accent);color:var(--accent)}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:16px}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px;box-shadow:var(--shadow)}
+.stat .k{color:var(--fg3);font-size:12px}
+.stat .v{font-size:23px;font-weight:650;line-height:1.25;margin-top:2px}
+.tabs{display:flex;gap:6px;margin-bottom:12px;border-bottom:1px solid var(--line)}
+.tabs button{border:0;background:transparent;border-radius:0;padding:9px 14px;color:var(--fg2);font-size:14.5px}
+.tabs button.on{color:var(--accent);border-bottom:2px solid var(--accent);font-weight:600}
+.filters{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px;
+  display:flex;gap:12px;flex-wrap:wrap;align-items:center;box-shadow:var(--shadow);margin-bottom:14px}
+.filters label{color:var(--fg3);font-size:12.5px;margin-right:4px}
+select,input[type=search]{font:inherit;background:var(--panel2);color:var(--fg);border:1px solid var(--line);
+  border-radius:8px;padding:6px 9px;outline:none;min-width:120px}
+select:focus,input:focus{border-color:var(--accent)}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{border:1px solid var(--line);background:var(--panel2);color:var(--fg2);border-radius:999px;
+  padding:4px 11px;font-size:12.5px;cursor:pointer;user-select:none}
+.chip.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.daygroup{margin-bottom:22px}
+.daygroup>.hd{display:flex;align-items:center;gap:10px;color:var(--fg2);font-size:13px;margin:0 0 8px 2px}
+.daygroup>.hd .ln{flex:1;height:1px;background:var(--line)}
+.ev{display:flex;gap:12px;background:var(--panel);border:1px solid var(--line);
+  border-left:3px solid var(--misc);border-radius:10px;padding:10px 13px;margin-bottom:8px;box-shadow:var(--shadow)}
+.ev.give{border-left-color:var(--give)}
+.ev.gamemode{border-left-color:var(--gm)}
+.ev.gamemode_other{border-left-color:var(--gm2)}
+.ev.item_set{border-left-color:var(--item)}
+.ev .t{color:var(--fg2);font-variant-numeric:tabular-nums;font-size:13px;min-width:66px;padding-top:1px}
+.ev .body{flex:1;min-width:0}
+.ev .l1{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.badge{font-size:11.5px;border-radius:6px;padding:2px 7px;background:var(--miscb);color:var(--misc);font-weight:600}
+.badge.give{background:var(--giveb);color:var(--give)}
+.badge.gamemode{background:var(--gmb);color:var(--gm)}
+.badge.gamemode_other{background:var(--gm2b);color:var(--gm2)}
+.badge.item_set{background:var(--itemb);color:var(--item)}
+.who{font-weight:600}
+.arrow{color:var(--fg3)}
+.item{margin-top:3px;display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+.item .zh{font-weight:600}
+.item .id{font-family:ui-monospace,Consolas,monospace;font-size:12.5px;color:var(--fg2);
+  background:var(--panel2);border:1px solid var(--line);border-radius:5px;padding:1px 6px}
+.item .en{color:var(--fg3);font-size:12.5px}
+.cnt{font-weight:700;color:var(--give)}
+.detail{color:var(--fg2);font-size:13px;margin-top:2px;word-break:break-word}
+.raw{margin-top:5px}
+.raw summary{color:var(--fg3);font-size:12px;cursor:pointer}
+.raw code{display:block;margin-top:5px;font-size:11.5px;color:var(--fg2);background:var(--panel2);
+  border:1px dashed var(--line);border-radius:6px;padding:6px 8px;word-break:break-all;white-space:pre-wrap}
+.layout{display:grid;grid-template-columns:230px 1fr;gap:14px;align-items:start}
+@media(max-width:760px){.layout{grid-template-columns:1fr}}
+.plist{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden;box-shadow:var(--shadow)}
+.plist .ph{padding:9px 12px;border-bottom:1px solid var(--line);color:var(--fg3);font-size:12.5px}
+.pitem{display:flex;align-items:center;gap:9px;padding:9px 12px;cursor:pointer;border-bottom:1px solid var(--line)}
+.pitem:last-child{border-bottom:0}
+.pitem:hover{background:var(--panel2)}
+.pitem.on{background:var(--panel2);box-shadow:inset 3px 0 0 var(--accent)}
+.ava{width:26px;height:26px;border-radius:8px;display:grid;place-items:center;color:#fff;font-size:12px;font-weight:700;flex:0 0 auto}
+.pitem .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pitem .ct{font-size:12px;color:var(--fg3)}
+.phead{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:13px 15px;
+  margin-bottom:12px;box-shadow:var(--shadow)}
+.phead .nm{font-size:17px;font-weight:650}
+.phead .meta{color:var(--fg3);font-size:12.5px;margin-top:3px}
+.tags{display:flex;gap:8px;flex-wrap:wrap;margin-top:9px}
+.tag{background:var(--panel2);border:1px solid var(--line);border-radius:999px;padding:3px 10px;font-size:12.5px;color:var(--fg2)}
+.empty{color:var(--fg3);text-align:center;padding:40px 10px;background:var(--panel);
+  border:1px dashed var(--line);border-radius:12px}
+.note{color:var(--fg3);font-size:12.5px;margin-top:18px;border-top:1px solid var(--line);padding-top:12px}
+.pill{display:inline-block;font-size:11.5px;color:var(--fg3);background:var(--panel2);
+  border:1px solid var(--line);border-radius:999px;padding:2px 8px;margin-right:6px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div>
+      <h1 id="siteTitle">Minecraft 管理员行为审计</h1>
+      <div class="sub">旁路采集服务端日志 · 时间均为北京时间 · <span id="upd">加载中…</span></div>
+    </div>
+    <div class="actions">
+      <button id="refresh">刷新</button>
+      <a class="btn" id="dl-csv" href="#">下载 CSV</a>
+      <a class="btn" id="dl-json" href="#">下载 JSONL（今日）</a>
+    </div>
+  </header>
+
+  <section class="stats" id="stats"></section>
+
+  <nav class="tabs">
+    <button data-view="timeline" class="on">时间轴</button>
+    <button data-view="players">玩家板块</button>
+  </nav>
+
+  <section class="filters">
+    <div><label>天数</label>
+      <select id="days">
+        <option value="1">今天</option>
+        <option value="3">近 3 天</option>
+        <option value="7" selected>近 7 天</option>
+        <option value="30">近 30 天</option>
+        <option value="all">全部</option>
+      </select>
+    </div>
+    <div><label>玩家</label><select id="player"><option value="">全部玩家</option></select></div>
+    <div class="chips" id="types"></div>
+    <div><label>搜索</label><input type="search" id="q" placeholder="物品 / 玩家 / 关键词"/></div>
+  </section>
+
+  <main id="view"></main>
+
+  <div class="note">
+    <span class="pill">数据来源</span>KubeJS 采集端把每条命令写成 <code>[MCAUDIT]</code> 日志行，采集器旁路读取服务端
+    <code>logs/latest.log</code> 解析入库。全程只读，不修改服务端任何文件。
+    <br/>
+    <span class="pill">覆盖范围</span>给物品 <code>/give</code>、<code>/item replace</code>、<code>/loot</code>、游戏模式切换
+    <code>/gamemode</code>、附魔 <code>/enchant</code>、药水 <code>/effect</code>、经验 <code>/xp</code>、
+    清背包 <code>/clear</code>、权限变更 <code>/op</code>、刷实体 <code>/summon</code>。
+    <br/>
+    <span class="pill">说明</span>管理员在<b>创造模式物品栏</b>里直接拖拽拿物品不会产生任何命令，因此无法记录；
+    这类行为只能通过「切换游戏模式」记录间接佐证。控制台 / 命令方块执行的命令，执行者记为 <code>console</code>。
+  </div>
+</div>
+
+<script>
+const K = new URLSearchParams(location.search).get('k') || '';
+const TYPES = [['give','管理员取物'],['gamemode','切换游戏模式'],['gamemode_other','切换他人模式'],
+               ['item_set','管理员设物'],['enchant','附魔'],['effect','药水'],['clear','清背包'],['give_failed','取物失败']];
+const state = {view:'timeline', days:'7', player:'', types:[], q:'', limit:800, data:null};
+
+function esc(s){return (s==null?'':String(s)).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function colorOf(name){let h=0;for(const c of (name||'?'))h=(h*31+c.charCodeAt(0))>>>0;return 'hsl('+(h%360)+',52%,46%)';}
+function api(path){return path + (path.includes('?')?'&':'?') + 'k=' + encodeURIComponent(K);}
+
+async function load(){
+  const p = new URLSearchParams({days:state.days, player:state.player, types:state.types.join(','), q:state.q, limit:state.limit});
+  const r = await fetch(api('/api/data?' + p.toString()));
+  if(!r.ok){ document.getElementById('view').innerHTML =
+      '<div class="empty">读取失败（HTTP ' + r.status + '）。'
+      + (r.status === 401 ? '该地址需要 <code>?k=</code> 访问令牌。' : '请确认看板服务正在运行。')
+      + '</div>'; return; }
+  state.data = await r.json();
+  if(state.data.site_title){                       // 站点标题可在 config.json 的 site_title 改
+    document.title = state.data.site_title;
+    document.getElementById('siteTitle').textContent = state.data.site_title;
+  }
+  renderStats(); fillPlayers(); renderView();
+  document.getElementById('upd').textContent = '更新于 ' + state.data.generated_at;
+  document.getElementById('dl-json').href = api('/download/events-' + new Date().toISOString().slice(0,10) + '.jsonl');
+}
+
+function renderStats(){
+  const d = state.data, s = d.stats || {};
+  const items = [['筛选出事件', d.total_filtered], ['管理员取物', s.give||0],
+                 ['切换游戏模式', (s.gamemode||0)+(s.gamemode_other||0)],
+                 ['涉及玩家', (d.players||[]).length], ['累计记录', d.total_all]];
+  document.getElementById('stats').innerHTML = items.map(([k,v]) =>
+    '<div class="stat"><div class="k">'+k+'</div><div class="v">'+v+'</div></div>').join('');
+  document.getElementById('dl-csv').href = api('/download/events.csv');
+}
+
+function fillPlayers(){
+  const sel = document.getElementById('player'), cur = state.player;
+  const list = state.data.players || [];
+  sel.innerHTML = '<option value="">全部玩家</option>' + list.map(p =>
+    '<option value="'+esc(p.name)+'"'+(p.name===cur?' selected':'')+'>'+esc(p.name)+'（'+p.count+'）</option>').join('');
+}
+
+function renderTypes(){
+  document.getElementById('types').innerHTML = TYPES.map(([v,cn]) =>
+    '<span class="chip'+(state.types.includes(v)?' on':'')+'" data-t="'+v+'">'+cn+'</span>').join('');
+  document.querySelectorAll('#types .chip').forEach(el => el.onclick = () => {
+    const t = el.dataset.t, i = state.types.indexOf(t);
+    i < 0 ? state.types.push(t) : state.types.splice(i,1);
+    renderTypes(); load();
+  });
+}
+
+function evCard(e){
+  const t = e.type, cn = (state.data.type_cn||{})[t] || t;
+  const item = (e.item_zh || e.item_en || e.item_raw)
+    ? '<div class="item">'
+      + '<span class="zh">' + esc(e.item_zh || e.item_en || e.item_raw) + '</span>'
+      + (e.item_id ? '<span class="id">' + esc(e.item_id) + '</span>' : '')
+      + (e.item_en && e.item_zh && e.item_en !== e.item_zh ? '<span class="en">' + esc(e.item_en) + '</span>' : '')
+      + (e.count ? '<span class="cnt">×' + e.count + '</span>' : '')
+      + (e.item_id ? '' : '<span class="en">（未匹配到 ID）</span>')
+      + '</div>' : '';
+  const who = (e.actor && e.target && e.actor !== e.target)
+    ? '<span class="who">' + esc(e.actor) + '</span><span class="arrow"> → </span><span class="who">' + esc(e.target) + '</span>'
+    : '<span class="who">' + esc(e.actor || e.target || '-') + '</span>';
+  const tgt = (e.target && e.actor === e.target) ? '' : (e.target ? '<span class="arrow">对象：</span>' + esc(e.target) : '');
+  return '<div class="ev ' + esc(t) + '">'
+    + '<div class="t">' + esc((e.ts||'').slice(11)) + '</div>'
+    + '<div class="body"><div class="l1">'
+    + '<span class="badge ' + esc(t) + '">' + esc(cn) + '</span>' + who
+    + (e._view ? '<span class="pill">' + esc(e._view) + '</span>' : '')
+    + '</div>' + item
+    + '<div class="detail">' + esc(e.detail_cn || '') + '</div>'
+    + '<details class="raw"><summary>原始日志</summary><code>' + esc(e.raw || '') + '</code></details>'
+    + '</div></div>';
+}
+
+function renderTimeline(){
+  const evs = state.data.events || [];
+  if(!evs.length) return '<div class="empty">没有符合条件的记录。<br/>服务端开服后，执行上述命令即会自动记录，无需任何额外操作。</div>';
+  const groups = {};
+  evs.forEach(e => (groups[e.date_bj] = groups[e.date_bj] || []).push(e));
+  return Object.keys(groups).sort().reverse().map(d =>
+    '<div class="daygroup"><div class="hd"><span>' + d + '（' + groups[d].length + ' 条）</span><span class="ln"></span></div>'
+    + groups[d].map(evCard).join('') + '</div>').join('')
+    + (state.data.total_filtered > evs.length ? '<div class="empty">仅显示最近 ' + evs.length + ' 条，共 ' + state.data.total_filtered + ' 条，请缩小筛选范围。</div>' : '');
+}
+
+function renderPlayers(){
+  const ps = state.data.players || [];
+  if(!ps.length) return '<div class="empty">暂无玩家行为记录。</div>';
+  const cur = state.player || ps[0].name;
+  const me = ps.find(p => p.name === cur) || ps[0];
+  const mine = (state.data.events || []).filter(e => e.actor === me.name || e.target === me.name);
+  const items = {};
+  mine.forEach(e => { const k = e.item_zh || e.item_en || ''; if(k) items[k] = (items[k]||0) + (e.count||1); });
+  const top = Object.entries(items).sort((a,b)=>b[1]-a[1]).slice(0,6);
+  return '<div class="layout"><div class="plist"><div class="ph">玩家（按记录数排序）</div>'
+    + ps.map(p => '<div class="pitem' + (p.name===me.name?' on':'') + '" data-p="' + esc(p.name) + '">'
+        + '<span class="ava" style="background:' + colorOf(p.name) + '">' + esc(p.name.slice(0,1).toUpperCase()) + '</span>'
+        + '<span class="nm">' + esc(p.name) + '</span><span class="ct">' + p.count + '</span></div>').join('')
+    + '</div><div><div class="phead"><div class="nm">' + esc(me.name) + '</div>'
+    + '<div class="meta">作为执行者 ' + (me.as_actor||0) + ' 次 · 作为对象 ' + (me.as_target||0) + ' 次 · 最近 ' + esc(me.last||'-') + '</div>'
+    + '<div class="tags"><span class="tag">取物 ' + (me.give||0) + '</span><span class="tag">模式切换 ' + (me.gamemode||0) + '</span>'
+    + top.map(([k,v]) => '<span class="tag">' + esc(k) + ' ×' + v + '</span>').join('') + '</div></div>'
+    + (mine.length ? mine.map(evCard).join('') : '<div class="empty">该玩家暂无记录</div>')
+    + '</div></div>';
+}
+
+function renderView(){
+  document.querySelectorAll('.pitem').forEach(el => el.onclick = () => { state.player = el.dataset.p; load(); });
+  document.getElementById('view').innerHTML = state.view === 'timeline' ? renderTimeline() : renderPlayers();
+}
+
+document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
+  state.view = b.dataset.view;
+  document.querySelectorAll('.tabs button').forEach(x => x.classList.toggle('on', x === b));
+  renderView();
+});
+document.getElementById('days').onchange = e => { state.days = e.target.value; load(); };
+document.getElementById('player').onchange = e => { state.player = e.target.value; load(); };
+document.getElementById('refresh').onclick = load;
+let qt; document.getElementById('q').oninput = e => { clearTimeout(qt); qt = setTimeout(() => { state.q = e.target.value; load(); }, 350); };
+
+renderTypes();
+load();
+setInterval(load, 30000);
+</script>
+</body>
+</html>

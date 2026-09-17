@@ -1,0 +1,23 @@
+# ---- 运行时产物（不入库）----
+log/
+state.json
+config.json
+item_names.json
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+.pytest_cache/
+
+# ---- 编辑器 / 系统 ----
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# 例外：示例配置要入库
+!examples/config.example.json

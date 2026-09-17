@@ -1,0 +1,29 @@
+{
+  "server_log": "/opt/minecraft/server/logs/latest.log",
+  "poll_seconds": 2,
+  "first_run_from_end": true,
+  "log_tz": "UTC",
+
+  "enabled_types": [
+    "give",
+    "item_set",
+    "loot",
+    "clear",
+    "gamemode",
+    "gamemode_other",
+    "enchant",
+    "effect",
+    "xp",
+    "op",
+    "summon"
+  ],
+  "log_other_commands": false,
+
+  "dash_host": "0.0.0.0",
+  "dash_port": 25567,
+  "require_token": true,
+  "lan_no_token": true,
+  "cookie_days": 365,
+  "site_title": "Minecraft 管理员行为审计",
+  "dash_token": ""
+}
