@@ -235,10 +235,12 @@ select:focus,input:focus{border-color:var(--accent)}
     <br/>
     <span class="pill">排行榜</span>按<b>天</b>统计七张榜：管理行为、死亡次数、力工破坏方块、力工放置方块、
     力工天榜（破坏+放置之和）、击杀生物、内鬼（玩家互杀）。
-    百分位配色参考 FF14 Logs：最高为 <span class="tier t-gold">100</span> 金色、<span class="tier t-pink">99</span> 粉色、
-    <span class="tier t-orange">91–98</span> 橙色，依次为
-    <span class="tier t-purple">76–90</span> 紫色、<span class="tier t-blue">51–75</span> 蓝色、
-    <span class="tier t-green">26–50</span> 绿色、<span class="tier t-gray">1–25</span> 灰色。
+    分数按名次映射色阶（取所在色的最低分，配色参考 FF14 Logs）：第 1 名
+    <span class="tier t-gold">100</span> 金色、第 2 名 <span class="tier t-pink">99</span> 粉色、
+    第 3 名 <span class="tier t-orange">91</span> 橙色、第 4 名 <span class="tier t-purple">76</span> 紫色、
+    第 5 名 <span class="tier t-blue">51</span> 蓝色、第 6 名 <span class="tier t-green">26</span> 绿色、
+    第 7 名起 <span class="tier t-gray">1</span> 灰色 —— 7 个互不相同的数值正好一人一色；
+    并列同名次同分同色。
     <br/>
     <span class="pill">操作提示</span>时间轴 / 玩家板块 / 排行榜里的<b>玩家名都可以点击</b>，直接筛选该玩家的全部记录；
     查某个玩家时会连带显示<b>他作为凶手的击杀记录</b>（标记「他是凶手」，含时间与被杀者）。
@@ -397,7 +399,9 @@ function renderLeaderboard(){
     + esc(d) + '</option>').join('');
   return '<div class="lbctl">'
     + '<div><label>统计日期</label><select id="lbday">' + opts + '</select></div>'
-    + '<div class="hint">百分位 = 当天「你胜过或战平的人数」占上榜玩家的比例，最高为 100；并列者同色，'
+    + '<div class="hint">分数按名次映射色阶（取所在色的最低分）：第 1 名 <b>100</b> 金、第 2 名 <b>99</b> 粉、'
+    + '第 3 名 <b>91</b> 橙、第 4 名 <b>76</b> 紫、第 5 名 <b>51</b> 蓝、第 6 名 <b>26</b> 绿、第 7 名起 <b>1</b> 灰 —— '
+    + '7 个互不相同的数值正好一人一色；并列同名次同分同色。'
     + '数值为 0 的玩家不上榜。榜单只按日期统计，不受上方筛选条件影响。'
     + '力工榜来自采集端每 5 分钟的破坏/放置汇总；力工天榜 = 破坏 + 放置之和；'
     + '内鬼榜（玩家互杀）按死亡事件实时统计。</div></div>'

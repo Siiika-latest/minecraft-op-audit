@@ -202,9 +202,9 @@ check("榜单可用日期", lb["days"], ["2026-09-19", "2026-09-20"])
 check("默认取最新一天", lb["date"], "2026-09-20")
 check("★ 管理榜最高分为 100", lb["admin"][0]["pct"], 100)
 check("★ 100 对应金色", lb["admin"][0]["tier"], "gold")
-check("管理榜完整结果（名次/次数/百分位/色阶）",
+check("管理榜完整结果（名次/次数/分值/色阶）",
       [(r["name"], r["value"], r["pct"], r["tier"]) for r in lb["admin"]],
-      [("Alice", 6, 100, "gold"), ("Bob", 3, 67, "blue"), ("Carol", 1, 33, "green")])
+      [("Alice", 6, 100, "gold"), ("Bob", 3, 99, "pink"), ("Carol", 1, 91, "orange")])
 check("死亡榜第一名", lb["death"][0]["name"], "Bob")
 check("★ 死亡榜最高分也是 100 金色", (lb["death"][0]["pct"], lb["death"][0]["tier"]), (100, "gold"))
 check("死亡榜完整顺序", [(r["name"], r["value"]) for r in lb["death"]],
@@ -221,9 +221,9 @@ check("名次连续", [r["rank"] for r in lb["admin"]], [1, 2, 3])
 p19 = d.build_payload({"days": ["all"], "lb": ["2026-09-19"]}, conf)
 lb19 = p19["leaderboard"]
 check("指定日期生效", lb19["date"], "2026-09-19")
-check("★ 并列第一同为 100 金色",
+check("★ 并列第一同为 100 金色，第三名照常 99 粉（dense rank）",
       [(r["name"], r["pct"], r["tier"]) for r in lb19["admin"]],
-      [("Eve", 100, "gold"), ("Frank", 100, "gold"), ("Gina", 33, "green")])
+      [("Eve", 100, "gold"), ("Frank", 100, "gold"), ("Gina", 99, "pink")])
 check("当日无人死亡 → 死亡榜为空", lb19["death"], [])
 check("不存在的日期回落到最新",
       d.build_payload({"days": ["all"], "lb": ["1999-01-01"]}, conf)["leaderboard"]["date"],
@@ -362,6 +362,43 @@ check("旧日期（09-20）行为榜为空",
       d.build_payload({"days": ["all"], "lb": ["2026-09-20"]}, conf)["leaderboard"]["broken"], [])
 check("生物名不进 PVP 榜", "Zombie" in [r["name"] for r in slb["pvp"]], False)
 check("类型中文名含 stats", d.TYPE_CN.get("stats"), "行为统计汇总")
+
+# ============================================================
+# v1.2.2：色阶最低分制（分值 = 所在色的最低分，优先铺满 7 色）
+# ============================================================
+print("\n=== v1.2.2 色阶最低分制 ===")
+# 7 人互不相同 → 正好一人一色（100/99/91/76/51/26/1）
+c7 = {"P1": 70, "P2": 60, "P3": 50, "P4": 40, "P5": 30, "P6": 20, "P7": 10}
+rows7 = d.percentile_rows(c7)
+check("★ 7 人互不相同 → 一人一色（分值/色阶）",
+      [(r["pct"], r["tier"]) for r in rows7],
+      [(100, "gold"), (99, "pink"), (91, "orange"), (76, "purple"),
+       (51, "blue"), (26, "green"), (1, "gray")])
+check("★ 7 人名次 1-7", [r["rank"] for r in rows7], [1, 2, 3, 4, 5, 6, 7])
+# 第 8 个不同名次起 → 灰色 1 分
+c8 = dict(c7)
+c8["P8"] = 5
+rows8 = d.percentile_rows(c8)
+check("★ 第 8 名起为灰色 1 分", (rows8[7]["pct"], rows8[7]["tier"]), (1, "gray"))
+# 并列：同名次同分同色，下一名照常推进（dense rank，第二高值永远 99）
+ct = {"A": 50, "B": 50, "C": 40}
+rowst = d.percentile_rows(ct)
+check("★ 并列第一同 100 金",
+      [(r["name"], r["rank"], r["pct"], r["tier"]) for r in rowst],
+      [("A", 1, 100, "gold"), ("B", 1, 100, "gold"), ("C", 2, 99, "pink")])
+# 少于 7 人：从金色起依次使用
+c2 = {"X": 9, "Y": 3}
+rows2 = d.percentile_rows(c2)
+check("2 人 → 金 + 粉", [(r["pct"], r["tier"]) for r in rows2],
+      [(100, "gold"), (99, "pink")])
+check("1 人 → 金", [(r["pct"], r["tier"]) for r in d.percentile_rows({"Solo": 1})],
+      [(100, "gold")])
+check("空榜", d.percentile_rows({}), [])
+check("零值不进榜", d.percentile_rows({"A": 0, "B": 2}),
+      [{"name": "B", "value": 2, "pct": 100, "tier": "gold", "rank": 1}])
+check("RANK_PCT 表与 tier_of 自洽",
+      [d.tier_of(p) for p in d.RANK_PCT + [1]],
+      ["gold", "pink", "orange", "purple", "blue", "green", "gray"])
 
 print("\n通过 %d/%d" % (ok, total))
 sys.exit(0 if ok == total else 1)

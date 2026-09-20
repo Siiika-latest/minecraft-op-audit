@@ -95,22 +95,35 @@ def killer_player(e, known):
     return ""
 
 
+# 各名次对应的分值 = 所在色阶的**最低分**（gold 100 / pink 99 / orange 91 /
+# purple 76 / blue 51 / green 26 / gray 1）。第 1～6 个不同名次逐色递进，
+# 第 7 个起为灰色 1 分 —— 这样 7 个数值互不相同的玩家正好一人一色。
+RANK_PCT = [100, 99, 91, 76, 51, 26]
+
+
 def percentile_rows(counter):
-    """{玩家: 次数} → 带名次与百分位的排行行（只列次数 > 0 的玩家）"""
-    vals = [v for v in counter.values() if v > 0]
-    n = len(vals)
-    if not n:
-        return []
+    """{玩家: 次数} → 带名次与分值的排行行（只列次数 > 0 的玩家）
+
+    v1.2.2 计分规则（色阶最低分制，优先铺满 7 色）：
+    - 名次 1 → **100**（金）、2 → **99**（粉）、3 → **91**（橙）、4 → **76**（紫）、
+      5 → **51**（蓝）、6 → **26**（绿）、7 及以后 → **1**（灰）。
+      即分值取所在色阶的最低分；7 个互不相同的数值正好一人一色。
+    - **并列同值同名次同分同色**，下一名次照常递进（dense rank），
+      保证「第二名永远是 99」，也让 7 色尽可能都有人。
+    - 次数为 0 的玩家不进榜。
+    """
+    items = sorted(((v, name) for name, v in counter.items() if v > 0),
+                   key=lambda x: (-x[0], x[1]))
     rows = []
-    for name, v in counter.items():
-        if v <= 0:
-            continue
-        le = sum(1 for x in vals if x <= v)          # 胜过或战平的人数
-        pct = max(1, min(100, round(100.0 * le / n)))
-        rows.append({"name": name, "value": v, "pct": pct, "tier": tier_of(pct)})
-    rows.sort(key=lambda r: (-r["value"], r["name"]))
-    for i, r in enumerate(rows, 1):
-        r["rank"] = i
+    rank = 0
+    prev_v = None
+    for v, name in items:
+        if v != prev_v:                     # 并列：同名次同分同色
+            rank += 1
+            prev_v = v
+        pct = RANK_PCT[rank - 1] if rank <= 6 else 1
+        rows.append({"name": name, "value": v, "pct": pct, "tier": tier_of(pct),
+                     "rank": rank})
     return rows
 
 
