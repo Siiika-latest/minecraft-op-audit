@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Minecraft 管理员行为审计 · 事件采集器
+Minecraft 管理员行为审计 · 事件采集器（v1.2.0）
 
 数据源：服务端日志中的 [MCAUDIT] {...} 行
         （由 kubejs/server_scripts/admin_audit.js 产生）
+兜底源：原版日志的 "<玩家> issued server command: /..." 行（可关，vanilla_fallback）
+        —— KubeJS 脚本失效/未加载的窗口期，原版日志仍留有一份玩家命令记录，
+           跨源去重保证同一次命令不会记两条。
 
 输出：  <安装目录>/log/events.csv               全量台账（Excel 可直接打开）
         <安装目录>/log/events-YYYY-MM-DD.jsonl  按天明细（Web 看板数据源）
@@ -13,11 +16,14 @@ Minecraft 管理员行为审计 · 事件采集器
 设计原则：完全旁路。只读取服务端日志，不修改服务端目录下任何文件。
 """
 import csv
+import glob
+import gzip
 import json
 import os
 import re
 import shlex
 import time
+import zlib
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
@@ -40,11 +46,16 @@ DEFAULT_CONF = {
     "first_run_from_end": True,
     # 服务端日志行时间戳所在时区。仅在事件缺毫秒时间戳时用于兜底换算北京时间
     "log_tz": "UTC",
-    # 需要记录的敏感行为类型（death = 玩家死亡）
+    # 需要记录的敏感行为类型（death = 玩家死亡，stats = 玩家行为统计汇总）
     "enabled_types": ["give", "item_set", "loot", "clear", "gamemode", "gamemode_other",
-                      "enchant", "effect", "xp", "op", "summon", "death"],
+                      "enchant", "effect", "xp", "op", "summon", "death", "stats"],
     # 是否把所有其它命令也记进台账（默认关闭，避免噪音）
     "log_other_commands": False,
+    # 是否解析原版日志的 "issued server command" 行作为 KubeJS 失效时的兜底。
+    # 同一次命令与 [MCAUDIT] 行之间按「执行者 + 命令 + ±1 秒」跨源去重，不会双记。
+    "vanilla_fallback": True,
+    # 日志轮转时是否补读 logs/ 下未处理过的 *.log.gz（防采集器停机跨轮转丢数据）
+    "rotated_archive_scan": True,
 }
 
 CSV_HEADER = ["时间(北京)", "日期", "事件类型", "执行者", "执行者模式", "对象玩家",
@@ -64,9 +75,35 @@ TYPE_CN = {
     "summon": "管理员刷实体",
     "clear": "清空玩家物品",
     "death": "玩家死亡",
+    "stats": "行为统计汇总",
     "other": "其它命令",
     "raw_cmd": "命令原文(兜底)",
 }
+
+# 游戏模式归一化：命令里 /gamemode 1、/gamemode c 与巡检上报的 creative
+# 必须落到同一个值，否则「命令记录」与「巡检记录」会被当成两次不同切换。
+MODE_NORM = {
+    "survival": "survival", "s": "survival", "0": "survival",
+    "creative": "creative", "c": "creative", "1": "creative",
+    "adventure": "adventure", "a": "adventure", "2": "adventure",
+    "spectator": "spectator", "sp": "spectator", "3": "spectator",
+}
+MODE_CN = {"survival": "生存", "creative": "创造",
+           "adventure": "冒险", "spectator": "旁观"}
+
+
+def norm_mode(m):
+    """/gamemode 参数（0/1/2/3、s/c/a/sp 缩写或全称）→ 规范模式名。
+    未知写法原样保留（兼容 mod 自定义模式）。"""
+    s = (m or "").strip().lower()
+    if not s:
+        return ""
+    return MODE_NORM.get(s, s)
+
+
+def mode_cn(m):
+    return MODE_CN.get(m, m or "未知")
+
 
 # 死因 id → 中文。未收录的原样显示。
 #
@@ -133,6 +170,21 @@ def log(msg):
     try:
         with open(WATCH_LOG, "a", encoding="utf-8") as f:
             f.write(line + "\n")
+    except OSError:
+        pass
+
+
+def trim_watch_log(max_bytes=5 * 1024 * 1024, keep_bytes=200 * 1024):
+    """watcher.log 超过 5MB 时保留尾部 200KB，防止长期运行无限增长。"""
+    try:
+        if os.path.exists(WATCH_LOG) and os.path.getsize(WATCH_LOG) > max_bytes:
+            with open(WATCH_LOG, "rb") as f:
+                f.seek(-keep_bytes, 2)
+                data = f.read()
+            with open(WATCH_LOG, "wb") as f:
+                f.write("[watcher.log 已自动截断，仅保留最近 200KB]\n".encode("utf-8") + data)
+            print("[watcher] watcher.log 超过 %dMB，已截断保留尾部" % (max_bytes // 1024 // 1024),
+                  flush=True)
     except OSError:
         pass
 
@@ -214,8 +266,8 @@ RE_FORGE_TS = re.compile(r"^\[(\d{2})([A-Za-z]{3})(\d{4}) (\d{2}):(\d{2}):(\d{2}
 RE_VANILLA_TS = re.compile(r"^\[(\d{2}):(\d{2}):(\d{2})\]")
 MONTHS = {"jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
           "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12}
-# 兜底：原版 admin 广播 / 服务端 issued server command
-RE_ADMIN_TAIL = re.compile(r"\[(?P<who>[^\[\]:]{1,32}): (?P<msg>.+)\]\s*$")
+# 原版日志兜底：玩家执行命令时服务端会写一行 "<玩家> issued server command: /命令"。
+# 这行与语言无关、始终存在 —— KubeJS 脚本失效的窗口期靠它兜底。
 RE_ISSUED = re.compile(r"(?P<who>\S+) issued server command:\s*(?P<cmd>/.*)$")
 
 
@@ -286,12 +338,13 @@ def classify(cmd, actor, log_other=False):
 
     # /gamemode <模式> [目标]
     if name == "gamemode" and args:
+        mode = norm_mode(args[0])
         if len(args) >= 2:
-            return dict(type="gamemode_other", target=args[1], mode=args[0], count=None)
-        return dict(type="gamemode", target=actor, mode=args[0], count=None)
+            return dict(type="gamemode_other", target=args[1], mode=mode, count=None)
+        return dict(type="gamemode", target=actor, mode=mode, count=None)
 
     if name == "defaultgamemode" and args:
-        return dict(type="gamemode_other", target="(服务器默认)", mode=args[0], count=None)
+        return dict(type="gamemode_other", target="(服务器默认)", mode=norm_mode(args[0]), count=None)
 
     # /clear [目标] [物品] [上限]
     if name == "clear":
@@ -350,6 +403,23 @@ def enrich(ev, names):
             ev["detail_cn"] += "（当时模式：%s）" % ev["gm"]
         return ev
 
+    # 行为统计汇总（v1.2.0）：一条记录代表一个统计周期内的聚合值
+    if ev.get("type") == "stats":
+        ev["item_id"], ev["item_zh"], ev["item_en"] = "", "", ""
+        ev["target"] = ""
+        parts = []
+        if ev.get("broken"):
+            parts.append("破坏方块 %d" % ev["broken"])
+        if ev.get("placed"):
+            parts.append("放置方块 %d" % ev["placed"])
+        if ev.get("mob_kills"):
+            parts.append("击杀生物 %d" % ev["mob_kills"])
+        if ev.get("pvp_kills"):
+            parts.append("击杀玩家 %d" % ev["pvp_kills"])
+        span = ev.get("span") or 0
+        ev["detail_cn"] = "%s 近 %d 秒：%s" % (actor, span, "、".join(parts) or "无行为")
+        return ev
+
     if ev.pop("is_xp", False):
         iid, izh, ien = "minecraft:experience", "经验", "Experience"
     elif ev.pop("is_perm", False):
@@ -385,9 +455,11 @@ def enrich(ev, names):
     elif t == "loot":
         ev["detail_cn"] = "%s 让 %s 获得掉落物（%s）" % (a, tg, ev.get("item_raw", ""))
     elif t == "gamemode":
-        ev["detail_cn"] = "%s 把自己的游戏模式切为 %s" % (a, ev.get("mode", ""))
+        # patrol=True 表示这条来自「模式巡检」而非命令（v1.2.0 兜底采集）
+        tag = "（巡检发现）" if ev.get("patrol") else ""
+        ev["detail_cn"] = "%s 把自己的游戏模式切为 %s%s" % (a, mode_cn(ev.get("mode", "")), tag)
     elif t == "gamemode_other":
-        ev["detail_cn"] = "%s 把 %s 的游戏模式切为 %s" % (a, tg, ev.get("mode", ""))
+        ev["detail_cn"] = "%s 把 %s 的游戏模式切为 %s" % (a, tg, mode_cn(ev.get("mode", "")))
     elif t == "enchant":
         ev["detail_cn"] = "%s 给 %s 的物品附魔 %s" % (a, tg, item)
     elif t == "effect":
@@ -404,8 +476,30 @@ def enrich(ev, names):
         ev["detail_cn"] = "%s 执行命令 /%s" % (a, cmd)
     else:
         ev["detail_cn"] = ev.get("raw", "")
-    if ev.get("gm"):
+    # patrol 巡检事件：detail 已含目标模式，不再追加「当时模式」后缀，避免同一条信息重复两遍
+    if ev.get("gm") and not ev.get("patrol"):
         ev["detail_cn"] += "（当时模式：%s）" % ev["gm"]
+    return ev
+
+
+def _fill_time(ev, d_ms, line, conf, now_utc=None):
+    """时间优先级：事件自带 epoch 毫秒 → 日志行时间戳 → 采集时刻。
+    同时写入内部字段 _e（epoch 秒，供跨源去重与巡检窗口判断，入库前剔除）。"""
+    now_utc = now_utc or datetime.now(TZ_UTC)
+    dt = None
+    try:
+        dt = datetime.fromtimestamp(int(str(d_ms)) / 1000.0, TZ_UTC).astimezone(TZ_BJ)
+    except (TypeError, ValueError, OSError, OverflowError):
+        dt = None
+    if dt is None:
+        ldt = log_ts(line, conf.get("log_tz", "UTC"))
+        dt = ldt.astimezone(TZ_BJ) if ldt else now_utc.astimezone(TZ_BJ)
+    ev["ts"] = dt.strftime("%Y-%m-%d %H:%M:%S")
+    ev["date_bj"] = dt.strftime("%Y-%m-%d")
+    try:
+        ev["_e"] = dt.timestamp()
+    except (OSError, OverflowError, ValueError):
+        ev["_e"] = 0.0
     return ev
 
 
@@ -424,12 +518,29 @@ def parse_line(line, names, conf, now_utc=None):
     cmd = str(d.get("cmd", ""))
     actor = str(d.get("actor", "console") or "console")
     gm = str(d.get("gm", "") or "")
-    if str(d.get("ev", "") or "") == "death":
+    evname = str(d.get("ev", "") or "")
+    if evname == "death":
         # 玩家死亡：不走命令分类器，直接构造事件
         ev = dict(type="death", target="", item_raw="", count=None,
                   cause=str(d.get("cause", "") or ""),
                   killer=str(d.get("killer", "") or ""),
+                  kp=_int(d.get("kp"), 0),
                   msg=str(d.get("msg", "") or ""))
+        cmd = ""
+    elif evname == "stats":
+        # 行为统计汇总（采集端每 5 分钟 / 下线时聚合输出一次）
+        ev = dict(type="stats", target="", item_raw="", count=None,
+                  broken=_int(d.get("broken"), 0) or 0,
+                  placed=_int(d.get("placed"), 0) or 0,
+                  mob_kills=_int(d.get("mob"), 0) or 0,
+                  pvp_kills=_int(d.get("pvp"), 0) or 0,
+                  span=_int(d.get("span"), 0) or 0)
+        cmd = ""
+    elif evname == "gmpatrol":
+        # 模式巡检兜底（采集端 5 秒轮询发现的游戏模式变化，非命令途径也能记到）
+        ev = dict(type="gamemode", target=actor,
+                  mode=norm_mode(str(d.get("gm", "") or "")),
+                  count=None, patrol=True)
         cmd = ""
     else:
         # 没有 ev 字段的老格式（只有命令事件）也走这里，保证向后兼容
@@ -439,42 +550,126 @@ def parse_line(line, names, conf, now_utc=None):
     ev["actor"] = actor
     ev["gm"] = gm
     ev["cmd"] = cmd
-    now_utc = now_utc or datetime.now(TZ_UTC)
-    # 时间优先级：事件自带 epoch 毫秒 → 日志行时间戳 → 采集时刻
-    dt = None
-    try:
-        dt = datetime.fromtimestamp(int(str(d.get("ms", ""))) / 1000.0, TZ_UTC).astimezone(TZ_BJ)
-    except (TypeError, ValueError, OSError, OverflowError):
-        dt = None
-    if dt is None:
-        ldt = log_ts(line, conf.get("log_tz", "UTC"))
-        dt = ldt.astimezone(TZ_BJ) if ldt else now_utc.astimezone(TZ_BJ)
-    ev["ts"] = dt.strftime("%Y-%m-%d %H:%M:%S")
-    ev["date_bj"] = dt.strftime("%Y-%m-%d")
+    _fill_time(ev, d.get("ms", ""), line, conf, now_utc)
     ev["raw"] = line
     return ev
 
 
+def parse_issued_line(line, names, conf, now_utc=None):
+    """解析一行原版日志 "<玩家> issued server command: /命令"（KubeJS 失效兜底）。
+
+    仅作为 [MCAUDIT] 行的**替补**：主流程会先收集本批 [MCAUDIT] 事件，
+    再用 merge_batch() 按「执行者 + 命令 + ±1 秒」跨源去重 —— 同一次命令
+    已有审计行时，兜底行会被丢弃，不会双记。
+    """
+    line = line.rstrip("\r\n")
+    if "[MCAUDIT]" in line or "issued server command" not in line:
+        return None
+    m = RE_ISSUED.search(line)
+    if not m:
+        return None
+    actor = m.group("who")
+    cmd = m.group("cmd")
+    ev = classify(cmd, actor, False)       # 兜底只记白名单内的管理命令
+    if not ev:
+        return None
+    ev["actor"] = actor
+    ev["gm"] = ""
+    ev["cmd"] = cmd
+    _fill_time(ev, "", line, conf, now_utc)
+    ev["raw"] = line
+    ev["fallback"] = "vanilla"
+    return ev
+
+
+def dedup_key(ev):
+    """跨源去重键：（执行者, 去斜杠的命令, 小写）"""
+    c = (ev.get("cmd", "") or "").strip()
+    if c.startswith("/"):
+        c = c[1:]
+    return (ev.get("actor", ""), c.lower())
+
+
+def merge_batch(primary, fallback):
+    """[MCAUDIT] 事件 + 原版兜底事件 → 合并去重后的列表。
+
+    兜底事件若与某条审计事件「执行者与命令相同、发生时间相差 ≤1 秒」，
+    判定为同一次命令，丢弃兜底行（审计行的信息更全：带 gm、带毫秒时间戳）。
+    """
+    base = {}
+    for ev in primary:
+        base.setdefault(dedup_key(ev), []).append(ev.get("_e", 0.0))
+    out = list(primary)
+    for ev in fallback:
+        s = ev.get("_e", 0.0)
+        if any(abs(s - s2) <= 1.0 for s2 in base.get(dedup_key(ev), ())):
+            continue
+        out.append(ev)
+    return out
+
+
+class GmPatrolFilter:
+    """「巡检发现的游戏模式变化」与「命令记录」的去重器。
+
+    命令途径切换会先产生一条 gamemode/gamemode_other 事件；随后（≤5 秒）
+    巡检也会发现这次变化。若不做处理，同一次切换会记两条。
+    规则：命令事件入账时记录 (被切玩家, 目标模式, 时间)；巡检事件到来时，
+    同玩家同模式且在窗口期（默认 120 秒）内 → 判为同一次，丢弃巡检事件。
+    """
+
+    def __init__(self, window=120):
+        self.window = window
+        self.recent = {}       # 玩家名 -> (mode, epoch_sec)
+
+    def note_command(self, target, mode, now):
+        if target and mode:
+            self.recent[target] = (mode, now or 0.0)
+
+    def allow_patrol(self, actor, mode, now):
+        r = self.recent.get(actor)
+        if r and r[0] == mode and abs((now or 0.0) - r[1]) <= self.window:
+            return False        # 命令已经记过这次切换
+        return True
+
+
 # ---------------- 落盘 ----------------
 class Sink:
-    def __init__(self):
+    """台账落盘 + 原始行去重。
+
+    去重用 crc32 稳定哈希（跨进程一致），窗口持久化到 state.json ——
+    这样「日志轮转时补读 *.log.gz 归档」不会把已入库的行再记一遍。
+    """
+
+    def __init__(self, saved=None):
         os.makedirs(LOG_DIR, exist_ok=True)
         self.csv_ready = os.path.exists(CSV_FILE) and os.path.getsize(CSV_FILE) > 0
-        self.recent = []
+        self.recent = list(saved or [])
+        self.recent_set = set(self.recent)
         self.count = 0
 
+    @staticmethod
+    def _hash(key):
+        return zlib.crc32(key.encode("utf-8", "replace")) & 0xFFFFFFFF
+
     def _dup(self, key):
-        h = hash(key)
-        if h in self.recent:
+        h = self._hash(key)
+        if h in self.recent_set:
             return True
+        self.recent_set.add(h)
         self.recent.append(h)
-        if len(self.recent) > 500:
-            self.recent = self.recent[-300:]
+        if len(self.recent) > 8000:
+            self.recent = self.recent[-5000:]
+            self.recent_set = set(self.recent)
         return False
+
+    def snapshot(self, limit=5000):
+        """用于持久化的最近哈希窗口"""
+        return self.recent[-limit:]
 
     def write(self, ev):
         if self._dup(ev["raw"]):
             return False
+        ev.pop("_e", None)
         p = os.path.join(LOG_DIR, "events-%s.jsonl" % ev["date_bj"])
         with open(p, "a", encoding="utf-8") as f:
             f.write(json.dumps(ev, ensure_ascii=False) + "\n")
@@ -490,7 +685,7 @@ class Sink:
                 ev.get("item_id", ""), ev.get("item_zh", ""), ev.get("item_en", ""),
                 "" if ev.get("count") is None else ev["count"],
                 ev.get("detail_cn", ""),
-                ("/" + ev["cmd"]) if ev.get("cmd") else "",   # 死亡事件没有命令，留空
+                ("/" + ev["cmd"]) if ev.get("cmd") else "",   # 死亡/统计事件没有命令，留空
                 ev["raw"],
             ])
         self.count += 1
@@ -515,10 +710,86 @@ def read_conf():
     conf = dict(DEFAULT_CONF)
     if os.path.exists(CONF_FILE):
         try:
-            conf.update(json.load(open(CONF_FILE, encoding="utf-8")))
+            # utf-8-sig：兼容带 BOM 的配置文件（Windows 记事本/PowerShell 5.1 默认写 BOM）
+            conf.update(json.load(open(CONF_FILE, encoding="utf-8-sig")))
         except (OSError, ValueError) as e:
             log("配置读取失败，用默认值: %s" % e)
     return conf
+
+
+def ingest_lines(lines, names, conf, enabled, sink, gmd, now_utc=None):
+    """一批日志行 → 事件入库（主循环与轮转归档补读共用）。
+
+    流程：解析 [MCAUDIT] 行 → 原版 issued 兜底行（可关）→ 跨源去重 →
+    类型白名单 → 巡检/命令模式去重 → enrich → 落盘。返回写入条数。
+    """
+    now_utc = now_utc or datetime.now(TZ_UTC)
+    vanilla_on = conf.get("vanilla_fallback", True)
+    prim, fb = [], []
+    for line in lines:
+        ev = parse_line(line, names, conf, now_utc)
+        if ev is not None:
+            prim.append(ev)
+            continue
+        if vanilla_on:
+            bev = parse_issued_line(line, names, conf, now_utc)
+            if bev is not None:
+                fb.append(bev)
+    batch = merge_batch(prim, fb) if vanilla_on else prim
+
+    n = 0
+    for ev in batch:
+        # 命令型模式切换无论是否入库都要入账，供巡检事件去重判断
+        if ev.get("type") in ("gamemode", "gamemode_other") and not ev.get("patrol"):
+            gmd.note_command(ev.get("target"), ev.get("mode"), ev.get("_e", 0.0))
+        if ev["type"] not in enabled:
+            continue
+        if ev.get("type") == "gamemode" and ev.get("patrol"):
+            if not gmd.allow_patrol(ev.get("actor"), ev.get("mode"), ev.get("_e", 0.0)):
+                log("巡检去重：%s 切为 %s 已由命令记录，跳过" %
+                    (ev.get("actor"), ev.get("mode")))
+                continue
+        ev = enrich(ev, names)
+        if sink.write(ev):
+            n += 1
+            log("事件: %s | %s | %s" % (ev["ts"], TYPE_CN.get(ev["type"]), ev["detail_cn"]))
+    return n
+
+
+def scan_rotated_archives(server_log, state, names, conf, enabled, sink, gmd):
+    """补读服务端日志目录下未处理过的 *.log.gz 归档。
+
+    解决的问题：采集器停机（或 systemd 重启间隙）恰逢日志轮转时，旧
+    latest.log 里尚未读到的那段会随压缩归档而「永久跳过」—— inode 已变，
+    offset 只对新文件有效。轮转时刻主动扫描归档，未处理过的全部读一遍，
+    靠 Sink 的持久化哈希窗口去重，已入库的行不会重复记录。
+
+    仅在检测到轮转的那一次调用（首次运行不回灌历史）。
+    返回是否有新归档被处理（用于判断是否需要保存 state）。
+    """
+    if not conf.get("rotated_archive_scan", True):
+        return False
+    log_dir = os.path.dirname(os.path.abspath(server_log))
+    done = set(state.get("gz_done") or [])
+    todo = [p for p in sorted(glob.glob(os.path.join(log_dir, "*.log.gz")))
+            if os.path.basename(p) not in done]
+    if not todo:
+        return False
+    total = 0
+    for p in todo:
+        bn = os.path.basename(p)
+        n = 0
+        try:
+            with gzip.open(p, "rt", encoding="utf-8", errors="replace") as f:
+                lines = f.read().splitlines()
+            n = ingest_lines(lines, names, conf, enabled, sink, gmd)
+        except OSError as e:
+            log("!! 归档 %s 读取失败（跳过）：%r" % (bn, e))
+        done.add(bn)
+        total += n
+        log("轮转归档补读 %s：写入 %d 条" % (bn, n))
+    state["gz_done"] = sorted(done)
+    return True
 
 
 def main():
@@ -526,14 +797,20 @@ def main():
     if not conf.get("server_log"):
         raise SystemExit("[watcher] 未配置 server_log。请先运行 deploy/install.sh，"
                          "或手动编辑 %s" % CONF_FILE)
+    trim_watch_log()
     enabled = set(conf.get("enabled_types") or DEFAULT_CONF["enabled_types"])
     names = Names(NAMES_FILE)
-    sink = Sink()
     st = load_state()
-    log("启动采集器: 日志=%s 轮询=%ss 类型=%s" %
-        (conf["server_log"], conf["poll_seconds"], sorted(enabled)))
+    sink = Sink(st.get("dedup") or [])
+    gmd = GmPatrolFilter()
+    log("启动采集器: 日志=%s 轮询=%ss 类型=%s 兜底=%s" %
+        (conf["server_log"], conf["poll_seconds"], sorted(enabled),
+         "开" if conf.get("vanilla_fallback", True) else "关"))
+    if "stats" not in enabled:
+        log("提示：enabled_types 未包含 stats，玩家行为统计（破坏/放置/击杀）不会入库")
 
     ino, off = st.get("inode"), st.get("offset", 0)
+    gz_done_changed = False
     path = conf["server_log"]
     warned = False
     while True:
@@ -551,30 +828,32 @@ def main():
                 ino = stat.st_ino
                 log("首次运行：从偏移 %d 开始" % off)
             if stat.st_ino != ino:
-                log("日志轮转（inode %s -> %s），从头读取新文件" % (ino, stat.st_ino))
+                log("日志轮转（inode %s -> %s），先补读归档再从头读取新文件" % (ino, stat.st_ino))
+                # 停机/轮转间隙可能漏读旧文件尾部：补读所有未处理过的 *.log.gz
+                gz_done_changed = scan_rotated_archives(
+                    path, st, names, conf, enabled, sink, gmd)
                 ino, off = stat.st_ino, 0
             if stat.st_size < off:
                 log("日志被截断，重置偏移")
                 off = 0
 
+            wrote = 0
             if stat.st_size > off:
                 with open(path, "r", encoding="utf-8", errors="replace") as f:
                     f.seek(off)
                     chunk = f.read()
                     off = f.tell()
-                n = 0
-                for line in chunk.splitlines():
-                    ev = parse_line(line, names, conf)
-                    if not ev or ev["type"] not in enabled:
-                        continue
-                    ev = enrich(ev, names)
-                    if sink.write(ev):
-                        n += 1
-                        log("事件: %s | %s | %s" % (ev["ts"], TYPE_CN.get(ev["type"]), ev["detail_cn"]))
-                if n:
-                    log("本批写入 %d 条，累计 %d 条" % (n, sink.count))
-            st["inode"], st["offset"] = ino, off
-            save_state(st)
+                wrote = ingest_lines(chunk.splitlines(), names, conf, enabled, sink, gmd)
+                if wrote:
+                    log("本批写入 %d 条，累计 %d 条" % (wrote, sink.count))
+            if wrote or gz_done_changed or ino != st.get("inode") or off != st.get("offset"):
+                st["inode"], st["offset"] = ino, off
+                st["dedup"] = sink.snapshot()
+                save_state(st)
+                gz_done_changed = False
+            elif "dedup" not in st:
+                st["dedup"] = sink.snapshot()
+                save_state(st)
         except Exception as e:
             log("!! 采集异常: %r" % e)
         time.sleep(conf["poll_seconds"])

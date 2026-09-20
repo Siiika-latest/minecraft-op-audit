@@ -1,3 +1,14 @@
+---
+AIGC:
+  ContentProducer: '001191110102MAD55U9H0F10002'
+  ContentPropagator: '001191110102MAD55U9H0F10002'
+  Label: '1'
+  ProduceID: '00f1115b-fb06-437c-9566-843e8647d727'
+  PropagateID: '00f1115b-fb06-437c-9566-843e8647d727'
+  ReservedCode1: '83754325-6008-4f5e-8cb0-50409837a87a'
+  ReservedCode2: '83754325-6008-4f5e-8cb0-50409837a87a'
+---
+
 # 常见问题
 
 ## 看板打不开 / 提示 401 需要访问令牌
@@ -75,12 +86,31 @@ systemctl restart minecraft-op-audit-collector
 
 装了新模组后需要重建一次，否则新物品显示为「（未匹配到 ID）」。
 
+## 玩家明明切了游戏模式，为什么没被记录
+
+v1.2.0 之前这是已知漏洞，按时间顺序出现过这些根因；新版已全部封堵：
+
+| 根因 | v1.2.0 的对策 |
+|---|---|
+| **非命令途径切换**（整合包 GUI 一键切换、mod 直调 `setGameMode()`）——不产生命令，命令事件根本不触发 | **模式巡检**：每 5 秒比对在线玩家模式快照，无论什么途径切换都能发现 |
+| **KubeJS 失效窗口**（脚本报错 / reload 中 / 未加载） | **原版日志兕底**：解析 `issued server command` 行，跨源去重不双记 |
+| **采集器停机恰逢日志轮转**，旧文件尾部未读行随压缩归档被永久跳过 | **归档补读**：轮转时补读未处理过的 `*.log.gz`，持久化去重保证不重复 |
+
+如果漏记发生在**升级 v1.2.0 之前**，那段时间的数据无法事后补回来（日志里确实没有）。
+排查历史记录时可以用原版日志交叉验证：
+
+```bash
+grep -a 'issued server command' <服务端>/logs/*.log* | grep -i gamemode
+```
+
 ## 能记录「在创造模式物品栏里直接拿物品」吗
 
 **不能**，这是机制限制：从创造模式物品栏拖拽物品不产生任何命令，
 原版也没有对应事件。这类行为只能通过两个间接线索判断：
 
-1. `gamemode` 事件 —— 某人把自己切成创造模式，本身就值得关注
+1. `gamemode` 事件 —— 某人把自己切成创造模式，本身就值得关注；
+   **v1.2.0 起即使通过 GUI 等**非命令途径**切换，巡检也会记下一条带
+   「（巡检发现）」标记的记录**
 2. 如果服务端另有容器/物品流水相关模组的日志，可自行对接
 
 ## 会不会拖慢服务器
@@ -88,8 +118,11 @@ systemctl restart minecraft-op-audit-collector
 不会。
 
 - **采集端**在最热路径上的开销是：拼一个字符串 + 一次日志输出，微秒级，且不涉及磁盘 I/O 之外的操作
-- **死亡事件**对所有生物触发，但第一行就判断"是不是玩家"，非玩家死亡只多一次 `instanceof`，
-  不产生日志。刷怪塔那种每秒几百只怪的场景也扛得住
+- **死亡事件**对所有生物触发，但第一行就判断"是不是玩家"，非玩家死亡只多一次
+  击杀者判定（玩家则计数 +1），不产生日志。刷怪塔那种每秒几百只怪的场景也扛得住
+- **方块破坏 / 放置**只在内存计数器上自增，每 5 分钟才汇总写一行日志
+- **模式巡检**每 5 秒一次，每次开销 ≈ 在线玩家数 × 一个方法调用；心跳回调本身
+  每 tick 只做一次取模自增
 - **采集器**每 2 秒读一次日志的增量部分，只做字符串正则与本地文件追加写
 - 看板的数据在内存里缓存，文件没变就不重新解析
 
@@ -98,7 +131,8 @@ systemctl restart minecraft-op-audit-collector
 ## 死亡记录为什么只有玩家，没有生物
 
 这是刻意的。`EntityEvents.death` 一视同仁地覆盖所有生物，但把刷怪塔的鸡和玩家的死亡
-混在一个台账里，榜单就废了 —— 所以采集端在最前面就把非玩家实体过滤掉了。
+混在一个台账里，榜单就废了。v1.2.0 起非玩家死亡会多做一步：**若击杀者是玩家，
+给他的「击杀生物」计数 +1**（纯内存，不写日志），然后依旧直接放过。
 
 如果你确实想要全生物死亡流水，把 `kubejs/admin_audit.js` 里死亡处理器开头的
 
@@ -152,9 +186,9 @@ if (!pd) { return }        // 不是玩家 → 直接放过
   grep -a '\[MCAUDIT\]' logs/latest.log | grep 'ev..:.death' | tail -3
   ```
 
-  注意 `EntityEvents.death` 只对**玩家**上报，所以上面这条测法需要把脚本里的
-  `if (!pd) { return }` 临时改成 `if (!pd) { pd = event.getEntity() }` 再测 ——
-  改完记得改回来，然后 `kubejs reload server_scripts`。
+  注意 `EntityEvents.death` 只对**玩家**上报，所以上面这条测法需要把脚本里
+  `if (!pd) { ... return }` 的非玩家分支临时改成 `if (!pd) { pd = event.getEntity() }`
+  再测 —— 改完记得改回来，然后 `kubejs reload server_scripts`。
 
 ## 玩家能看到或篡改审计数据吗
 
@@ -172,14 +206,15 @@ if (!pd) { return }        // 不是玩家 → 直接放过
 
 不支持开箱即用 —— KubeJS 是 Forge/Fabric 的模组，不能装在插件服务端上。
 
-`collector/audit_watcher.py` 里预留了一条兜底正则，可以解析 Paper 的
+但 v1.2.0 起采集器**内置**了原版日志兜底（`vanilla_fallback`，默认开）：能解析
 
 ```
 <玩家> issued server command: /命令
 ```
 
-若你的插件服务端能把这些行写进日志（部分日志插件可以），采集器就能直接吃。
-具体做法是给 `parse_line()` 加一个分支，把匹配到的行组装成同样的 JSON 结构。
+这类行（Forge / Paper 都会写）。若你的服务端能让这些行进日志，即使不装 KubeJS，
+白名单内的管理命令（give / gamemode / op 等）也能被记录 —— 但玩家死亡、行为统计
+与模式巡检仍需 KubeJS 采集端。
 
 ## 支持 1.21 / KubeJS 7 / NeoForge 吗
 
@@ -208,11 +243,14 @@ systemctl restart minecraft-op-audit-collector minecraft-op-audit-dashboard
 ```
 
 可用的类型名：`give` `give_failed` `item_set` `loot` `gamemode` `gamemode_other`
-`enchant` `effect` `xp` `op` `summon` `clear` `death`。
+`enchant` `effect` `xp` `op` `summon` `clear` `death` `stats`。
 
 **不想要死亡统计**就把 `death` 从中删掉 —— 采集端仍会上报（KubeJS 侧不停），
 但采集器会直接丢弃，台账里不会出现。想连上报都省掉，
 就把 `kubejs/admin_audit.js` 里整个 `EntityEvents.death` 处理器删掉。
+
+**不想要行为统计**就把 `stats` 删掉 —— 破坏 / 放置 / 击杀的汇总不再入库，
+但巡检（gamemode）与死亡记录不受影响。
 
 反过来，想把**所有**命令都记进台账（不推荐，噪音大）：
 
@@ -267,3 +305,5 @@ sudo bash deploy/install.sh --server-dir /新/服务端/目录
 
 不需要集成。面板只是启动服务端的工具，本项目从**日志文件**取数，
 与面板无关。面板终端里执行的命令会被记为 `console`（无法区分操作人）。
+
+> AI生成

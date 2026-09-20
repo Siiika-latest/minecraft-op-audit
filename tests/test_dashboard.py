@@ -249,5 +249,95 @@ TIER_CASES = [(100, "gold"), (99, "pink"), (98, "orange"), (95, "orange"), (91, 
 for _v, _want in TIER_CASES:
     check("tier_of(%d)" % _v, d.tier_of(_v), _want)
 
+# ============================================================
+# v1.2.0：玩家行为统计聚合（破坏/放置/击杀）与 PVP 推导、四张新榜
+# ============================================================
+print("\n=== v1.2.0 行为统计与 PVP ===")
+tmp3 = tempfile.mkdtemp(prefix="mcaudit-stats-")
+atexit.register(shutil.rmtree, tmp3, True)
+d.LOG_DIR = tmp3
+d._cache["sig"] = None
+
+
+def stat(date, actor, broken=0, placed=0, mob=0, pvp=0):
+    return {"ts": date + " 12:00:00", "date_bj": date, "type": "stats", "actor": actor,
+            "target": "", "broken": broken, "placed": placed,
+            "mob_kills": mob, "pvp_kills": pvp, "count": None,
+            "item_id": "", "item_zh": "", "detail_cn": "汇总", "raw": "stats|%s|%s" % (date, actor)}
+
+
+def dth(date, actor, killer="", kp=0):
+    return {"ts": date + " 12:00:00", "date_bj": date, "type": "death", "actor": actor,
+            "target": "", "killer": killer, "kp": kp, "cause": "player",
+            "item_id": "", "item_zh": "", "detail_cn": "死亡", "raw": "death|%s|%s|%s" % (date, actor, killer)}
+
+
+SE = [
+    # 2026-09-21：Alice 两次汇总 broken 10+5=15、placed 4+1=5、mob 6+2=8
+    stat("2026-09-21", "Alice", broken=10, placed=4, mob=6),
+    stat("2026-09-21", "Alice", broken=5, placed=1, mob=2),
+    stat("2026-09-21", "Bob", broken=3, placed=8),
+    dth("2026-09-21", "Carol", killer="Alice", kp=1),     # PVP：kp 标记
+    dth("2026-09-21", "Carol", killer="Zombie", kp=0),    # 生物击杀者不算 PVP
+    dth("2026-09-21", "Dave", killer="Bob", kp=0),        # 旧数据兜底：Bob 在已知玩家集合
+    {"ts": "2026-09-21 12:00:00", "date_bj": "2026-09-21", "type": "give", "actor": "Alice",
+     "target": "Alice", "item_id": "minecraft:diamond", "item_zh": "钻石", "count": 1,
+     "detail_cn": "give", "raw": "give|0921|Alice"},
+    # 2026-09-20：一天 give，保证榜单默认取最新日期
+    {"ts": "2026-09-20 12:00:00", "date_bj": "2026-09-20", "type": "give", "actor": "Eve",
+     "target": "Eve", "item_id": "", "item_zh": "", "count": 1, "detail_cn": "give", "raw": "give|0920|Eve"},
+]
+with open(os.path.join(tmp3, "events-2026-09-21.jsonl"), "w", encoding="utf-8") as f:
+    for _e in SE:
+        if _e["date_bj"] == "2026-09-21":
+            f.write(json.dumps(_e, ensure_ascii=False) + "\n")
+with open(os.path.join(tmp3, "events-2026-09-20.jsonl"), "w", encoding="utf-8") as f:
+    for _e in SE:
+        if _e["date_bj"] == "2026-09-20":
+            f.write(json.dumps(_e, ensure_ascii=False) + "\n")
+
+sp = d.build_payload({"days": ["all"]}, conf)
+spx = {x["name"]: x for x in sp["players"]}
+check("stats 数值跨多条汇总累加（broken）", spx["Alice"]["broken"], 15)
+check("stats 数值累加（placed）", spx["Alice"]["placed"], 5)
+check("stats 数值累加（mob_kills）", spx["Alice"]["mob_kills"], 8)
+check("stats 汇总不并入 as_actor", spx["Alice"]["as_actor"], 1)      # 只有那条 give
+check("stats 计入记录数（2 条汇总 + 1 give）", spx["Alice"]["count"], 3)
+check("PVP 从死亡事件 kp 标记推导", spx["Alice"]["pvp_kills"], 1)
+check("PVP 旧数据按已知玩家名兜底", spx["Bob"]["pvp_kills"], 1)
+check("生物击杀者不计 PVP", "Zombie" in spx, False)
+check("nums 破坏合计", sp["nums"]["broken"], 18)
+check("nums 放置合计", sp["nums"]["placed"], 13)
+check("nums 击杀生物合计", sp["nums"]["mob_kills"], 8)
+check("nums PVP 合计", sp["nums"]["pvp_kills"], 2)
+check("类型统计含 stats", sp["stats"].get("stats"), 3)
+
+# killer_player / known_player_names 单元行为
+kn = d.known_player_names(SE)
+check("已知玩家名含 Alice", "Alice" in kn, True)
+check("已知玩家名不含 console", "console" in kn, False)
+check("killer_player: kp 标记优先", d.killer_player(dth("2026-09-21", "X", "Alice", kp=1), kn), "Alice")
+check("killer_player: 生物名被拒", d.killer_player(dth("2026-09-21", "X", "Zombie", kp=0), kn), "")
+check("killer_player: 兜底名命中集合", d.killer_player(dth("2026-09-21", "X", "Bob", kp=0), kn), "Bob")
+check("killer_player: 空击杀者", d.killer_player(dth("2026-09-21", "X", ""), kn), "")
+
+# 四张新榜（默认取最新有数据的日期 2026-09-21）
+slb = sp["leaderboard"]
+check("行为榜默认日期", slb["date"], "2026-09-21")
+check("破坏榜第一", [(r["name"], r["value"]) for r in slb["broken"][:1]], [("Alice", 15)])
+check("破坏榜百分位金色", slb["broken"][0]["tier"], "gold")
+check("破坏榜第二名 Bob", [(r["name"], r["value"]) for r in slb["broken"][1:]], [("Bob", 3)])
+check("放置榜第一", [(r["name"], r["value"]) for r in slb["placed"][:1]], [("Bob", 8)])
+check("击杀生物榜第一", [(r["name"], r["value"]) for r in slb["kills"][:1]], [("Alice", 8)])
+check("PVP 榜并列第一（Alice/Bob 各 1）",
+      sorted([(r["name"], r["pct"], r["tier"]) for r in slb["pvp"]]),
+      sorted([("Alice", 100, "gold"), ("Bob", 100, "gold")]))
+check("PVP 榜合计", slb["pvp_total"], 2)
+check("破坏榜合计", slb["broken_total"], 18)
+check("旧日期（09-20）行为榜为空",
+      d.build_payload({"days": ["all"], "lb": ["2026-09-20"]}, conf)["leaderboard"]["broken"], [])
+check("生物名不进 PVP 榜", "Zombie" in [r["name"] for r in slb["pvp"]], False)
+check("类型中文名含 stats", d.TYPE_CN.get("stats"), "行为统计汇总")
+
 print("\n通过 %d/%d" % (ok, total))
 sys.exit(0 if ok == total else 1)

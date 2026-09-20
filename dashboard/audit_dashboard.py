@@ -34,7 +34,7 @@ TYPE_CN = {
     "loot": "管理员掉落物", "gamemode": "切换游戏模式", "gamemode_other": "切换他人模式",
     "enchant": "管理员附魔", "effect": "管理员给药水", "xp": "管理员给经验",
     "op": "权限变更", "summon": "管理员刷实体", "clear": "清空玩家物品",
-    "death": "玩家死亡", "other": "其它命令", "raw_cmd": "命令原文",
+    "death": "玩家死亡", "stats": "行为统计汇总", "other": "其它命令", "raw_cmd": "命令原文",
 }
 
 # ---------------- 排行榜 / 百分位（参考 FF14 Logs 的配色分档） ----------------
@@ -72,6 +72,29 @@ def clean_name(name):
 NON_PLAYERS = {"console", "unknown-player", "server", "Server", "CONSOLE"}
 
 
+def known_player_names(evs):
+    """全量事件里出现过的玩家名集合（执行者 + 对象）。
+    用于旧数据（死亡事件无 kp 标记）判断击杀者是不是玩家的兑底。"""
+    known = set()
+    for e in evs:
+        for n in (clean_name(e.get("actor", "")), clean_name(e.get("target", ""))):
+            if n and n not in NON_PLAYERS:
+                known.add(n)
+    return known
+
+
+def killer_player(e, known):
+    """死亡事件里「击杀者是玩家」时返回击杀者名，否则返回 ""。
+    优先用采集端的 kp 标记（可靠）；旧数据无标记时兑底：击杀者名出现在
+    已知玩家名集合中才算（避免 Zombie 这类生物名混进 PVP 榜）。"""
+    k = clean_name(e.get("killer", ""))
+    if not k or k in NON_PLAYERS:
+        return ""
+    if e.get("kp") == 1 or k in known:
+        return k
+    return ""
+
+
 def percentile_rows(counter):
     """{玩家: 次数} → 带名次与百分位的排行行（只列次数 > 0 的玩家）"""
     vals = [v for v in counter.values() if v > 0]
@@ -92,31 +115,61 @@ def percentile_rows(counter):
 
 
 def build_leaderboard(evs, day=""):
-    """按「天」出榜：管理行为次数榜 + 死亡次数榜。
+    """按「天」出榜：管理行为次数榜 + 死亡次数榜，以及四张行为统计榜
+    （破坏方块 / 放置方块 / 击杀生物 / PVP 击杀）。
 
     刻意不受页面上的 天数/玩家/类型 筛选影响 —— 榜单要能横着比。
+    行为统计榜的数值 = 当天该玩家所有 stats 汇总事件的数值之和；
+    PVP 榜 = 当天死亡事件中击杀者为玩家的次数（不与 stats 双计）。
     """
     days = sorted({e.get("date_bj", "") for e in evs if e.get("date_bj")})
     date = day if day in days else (days[-1] if days else "")
+    known = known_player_names(evs)
     admin, death = {}, {}
+    broken, placed, kills, pvp = {}, {}, {}, {}
     for e in evs:
         if e.get("date_bj") != date:
+            continue
+        t = e.get("type")
+        if t == "stats":
+            actor = clean_name(e.get("actor", ""))
+            if not actor or actor in NON_PLAYERS:
+                continue
+            for src, dst in (("broken", broken), ("placed", placed), ("mob_kills", kills)):
+                v = e.get(src) or 0
+                if v > 0:
+                    dst[actor] = dst.get(actor, 0) + v
+            continue
+        if t == "death":
+            actor = clean_name(e.get("actor", ""))
+            if actor and actor not in NON_PLAYERS:
+                death[actor] = death.get(actor, 0) + 1
+            kk = killer_player(e, known)
+            if kk:
+                pvp[kk] = pvp.get(kk, 0) + 1
             continue
         actor = clean_name(e.get("actor", ""))
         if not actor or actor in NON_PLAYERS:
             continue
-        if e.get("type") == "death":
-            death[actor] = death.get(actor, 0) + 1
-        else:
-            admin[actor] = admin.get(actor, 0) + 1
+        admin[actor] = admin.get(actor, 0) + 1
     a_rows, d_rows = percentile_rows(admin), percentile_rows(death)
+    b_rows, p_rows = percentile_rows(broken), percentile_rows(placed)
+    k_rows, v_rows = percentile_rows(kills), percentile_rows(pvp)
     return {
         "date": date,
         "days": days,
         "admin": a_rows,
         "death": d_rows,
+        "broken": b_rows,
+        "placed": p_rows,
+        "kills": k_rows,
+        "pvp": v_rows,
         "admin_total": sum(admin.values()),
         "death_total": sum(death.values()),
+        "broken_total": sum(broken.values()),
+        "placed_total": sum(placed.values()),
+        "kills_total": sum(kills.values()),
+        "pvp_total": sum(pvp.values()),
         "tiers": [{"lo": lo, "hi": hi, "key": k} for lo, hi, k in TIER_TABLE],
     }
 
@@ -129,7 +182,8 @@ def load_conf():
     c = {}
     if os.path.exists(CONF_FILE):
         try:
-            c = json.load(open(CONF_FILE, encoding="utf-8"))
+            # utf-8-sig：兼容带 BOM 的配置文件（Windows 记事本/PowerShell 5.1 默认写 BOM）
+            c = json.load(open(CONF_FILE, encoding="utf-8-sig"))
         except (OSError, ValueError):
             c = {}
     c.setdefault("dash_host", "0.0.0.0")
@@ -176,7 +230,8 @@ def load_events():
     evs = []
     for p in files:
         try:
-            with open(p, encoding="utf-8") as f:
+            # utf-8-sig：兼容带 BOM 的台账文件（Windows 工具人工编辑后可能引入）
+            with open(p, encoding="utf-8-sig") as f:
                 for line in f:
                     line = line.strip()
                     if not line:
@@ -205,6 +260,7 @@ def build_payload(q, conf):
         limit = 800
 
     # 玩家聚合基于全量数据，不受筛选影响，便于对照
+    known = known_player_names(evs)
     all_players = {}
     for e in evs:
         t = e.get("type")
@@ -213,16 +269,20 @@ def build_payload(q, conf):
         # 同一条事件中「自己给自己」（如 /give Alice ... @s）：
         # 这个人既算执行者也算对象，但事件数 count 只能记一次，否则会翻倍
         involved = [n for n in dict.fromkeys([actor, target]) if n]
-        if not involved:
+        if not involved and not (t == "death" and killer_player(e, known)):
             continue
         for name in involved:
             d = all_players.setdefault(name, {"name": name, "count": 0, "give": 0, "gamemode": 0,
                                               "deaths": 0, "last": "",
-                                              "as_actor": 0, "as_target": 0})
+                                              "as_actor": 0, "as_target": 0,
+                                              "broken": 0, "placed": 0,
+                                              "mob_kills": 0, "pvp_kills": 0})
             d["count"] += 1
             if name == actor:
                 if t == "death":
                     d["deaths"] += 1          # 死亡单独计数，不并入「作为执行者」
+                elif t == "stats":
+                    pass                      # 行为统计汇总也不算管理行为，只累加数值
                 else:
                     d["as_actor"] += 1
             if name == target:
@@ -231,8 +291,23 @@ def build_payload(q, conf):
                 d["give"] += 1
             if t in ("gamemode", "gamemode_other"):
                 d["gamemode"] += 1
+            if t == "stats":
+                d["broken"] += e.get("broken") or 0
+                d["placed"] += e.get("placed") or 0
+                d["mob_kills"] += e.get("mob_kills") or 0
             if e.get("ts", "") > d["last"]:
                 d["last"] = e.get("ts", "")
+        # PVP 击杀数：从死亡事件的击杀者推导（不与 stats 的 pvp_kills 双计）。
+        # 只杀人、无任何其他记录的玩家也要有个条目，否则玩家板块看不到他。
+        if t == "death":
+            kk = killer_player(e, known)
+            if kk:
+                kd = all_players.setdefault(kk, {"name": kk, "count": 0, "give": 0, "gamemode": 0,
+                                                  "deaths": 0, "last": "",
+                                                  "as_actor": 0, "as_target": 0,
+                                                  "broken": 0, "placed": 0,
+                                                  "mob_kills": 0, "pvp_kills": 0})
+                kd["pvp_kills"] += 1
 
     sel = evs
     if player:
@@ -252,11 +327,17 @@ def build_payload(q, conf):
 
     stats = {}
     items = {}
+    nums = {"broken": 0, "placed": 0, "mob_kills": 0, "pvp_kills": 0}
     for e in sel:
         stats[e.get("type")] = stats.get(e.get("type"), 0) + 1
         key = e.get("item_id") or e.get("item_en") or e.get("item_raw") or ""
         if key and e.get("type") in ("give", "item_set"):
             items[key] = items.get(key, 0) + 1
+        if e.get("type") == "stats":
+            for f in ("broken", "placed", "mob_kills"):
+                nums[f] += e.get(f) or 0
+        elif e.get("type") == "death" and killer_player(e, known):
+            nums["pvp_kills"] += 1
 
     shown = sel[:limit]
     if player:
@@ -272,6 +353,7 @@ def build_payload(q, conf):
         "players": sorted(all_players.values(), key=lambda x: (-x["count"], x["name"])),
         "leaderboard": build_leaderboard(evs, (q.get("lb", [""])[0] or "").strip()),
         "stats": stats,
+        "nums": nums,
         "top_items": sorted(items.items(), key=lambda x: -x[1])[:20],
         "type_cn": TYPE_CN,
     }

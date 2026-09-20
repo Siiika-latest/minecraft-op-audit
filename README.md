@@ -1,6 +1,19 @@
+---
+AIGC:
+  ContentProducer: '001191110102MAD55U9H0F10002'
+  ContentPropagator: '001191110102MAD55U9H0F10002'
+  Label: '1'
+  ProduceID: 'e97a90d3-992a-46a9-ba4c-1e8e5354ce2b'
+  PropagateID: 'e97a90d3-992a-46a9-ba4c-1e8e5354ce2b'
+  ReservedCode1: 'd0c15dd7-662d-4060-b324-3eb42d4e8f8f'
+  ReservedCode2: 'd0c15dd7-662d-4060-b324-3eb42d4e8f8f'
+---
+
 # minecraft-op-audit · Minecraft 管理员行为审计
 
-**一条命令装好的旁路审计系统**：记录每位玩家（尤其是 OP）执行了哪些管理命令 —— 给谁发了什么物品、把谁切成了创造模式、开了谁的权限 —— 并统计每位玩家的**死亡次数**，以 **排行榜**、**时间轴**、**玩家板块** 三种视图呈现。
+# 为什么不能叫Minecraft logs呢（）
+
+**一条命令装好的旁路审计系统**：记录每位玩家（尤其是 OP）执行了哪些管理命令 —— 给谁发了什么物品、把谁切成了创造模式、开了谁的权限 —— 并统计每位玩家的**死亡次数**与**行为统计**（破坏 / 放置方块、击杀生物 / 玩家），以 **排行榜**、**时间轴**、**玩家板块** 三种视图呈现。
 
 排行榜按天出榜，百分位配色参考 **FF14 Logs**：最高 <span>100</span> 金色、99 粉色、91–98 橙色……
 
@@ -160,9 +173,12 @@ sudo bash deploy/uninstall.sh --purge    # 连台账一起删除
 
 | 视图 | 说明 |
 |---|---|
-| **排行榜** | 按天出两张榜：**管理员行为榜** 与 **死亡次数榜**。每行显示名次、玩家、次数与百分位徽章（配色参考 FF14 Logs），可切换统计日期 |
+| **排行榜** | 按天出六张榜：**管理员行为榜**、**死亡次数榜**、**破坏方块榜**、**放置方块榜**、**击杀生物榜**、**PVP 击杀榜**。每行显示名次、玩家、数值与百分位徽章（配色参考 FF14 Logs），可切换统计日期 |
 | **时间轴** | 按日期分组的事件流。每条显示类型徽章、执行者 → 对象、物品（中文名 + ID + 英文名 + 数量），可展开原始日志行；死亡事件显示击杀者与游戏内死讯原文 |
-| **玩家板块** | 左侧玩家列表（按记录数排序），点选任一玩家即查看**他的全部行为**，顶部带概览：作为执行者 N 次 / 作为对象 N 次 / 死亡 N 次 / 最近时间 / 取物 N / 模式切换 N / 该玩家当日榜单百分位 |
+| **玩家板块** | 左侧玩家列表（按记录数排序），点选任一玩家即查看**他的全部行为**，顶部带概览：作为执行者 N 次 / 作为对象 N 次 / 死亡 N 次 / 破坏 N / 放置 N / 击杀 N / 最近时间 / 取物 N / 模式切换 N / 该玩家当日榜单百分位 |
+
+> **任何视图里的玩家名都可以点击**，直接筛选该玩家的全部记录；
+> 不想筛了用筛选栏右侧的「清除玩家筛选」。
 
 筛选条件（排行榜视图下自动隐藏，因为榜单只按日期统计）：**天数**（今天 / 3 天 / 7 天 / 30 天 / 全部）、**指定玩家**、**事件类型**标签、**关键词搜索**。
 
@@ -177,12 +193,15 @@ sudo bash deploy/uninstall.sh --purge    # 连台账一起删除
 
 ## 排行榜与色阶
 
-榜单按**天**统计，每天两张：
+榜单按**天**统计，每天六张：
 
 | 榜单 | 统计口径 |
 |---|---|
 | **管理员行为榜** | 当天该玩家作为**执行者**产生的管理事件数（取物 / 设物 / 切模式 / 附魔 / 药水 / 经验 / 清背包 / 权限变更 / 刷实体 / 掉落物） |
 | **死亡次数榜** | 当天该玩家**死亡**的次数 |
+| **破坏方块榜 / 放置方块榜** | 当天该玩家 stats 汇总事件的破坏 / 放置方块数之和 |
+| **击杀生物榜** | 当天该玩家击杀生物数（stats 汇总之和） |
+| **PVP 击杀榜** | 当天该玩家作为击杀者出现的玩家死亡次数（实时，不与 stats 双计） |
 
 ### 百分位怎么算
 
@@ -238,9 +257,36 @@ sudo bash deploy/uninstall.sh --purge    # 连台账一起删除
 | `/clear [玩家]` | `clear` | 清空玩家物品 |
 | `/op`、`/deop <玩家>` | `op` | 权限变更 |
 | `/summon <实体>` | `summon` | 管理员刷实体 |
-| （玩家死亡，非命令） | `death` | 玩家死亡（记录死因与击杀者） |
+| （玩家死亡，非命令） | `death` | 玩家死亡（记录死因、击杀者与 kp 标记） |
+| （破坏 / 放置方块） | `stats` | 行为统计汇总（每 5 分钟聚合上报一次） |
+| （非命令途径切模式，如整合包 GUI） | `gamemode` | 切换游戏模式，带「（巡检发现）」标记 |
 
 `time` / `weather` / `say` 这类噪声**默认不记录**。若想把所有命令都记进台账，把 `config.json` 的 `log_other_commands` 改成 `true`。
+
+### 玩家行为统计是怎么来的
+
+破坏 / 放置 / 击杀的量太大（刷怪塔每秒可能死几百只怪），**逐条写日志会撑爆服务端日志**。
+采集端改为在内存中聚合计数，每 5 分钟（6000 tick）或玩家下线时汇总输出一条
+`ev=stats`：
+
+```json
+{"ev":"stats","ms":"...","actor":"Alice","broken":12,"placed":3,"mob":7,"pvp":1,"span":300}
+```
+
+挂机零行为的玩家不产生任何输出。**PVP 击杀**不依赖汇总：死亡事件带 `kp` 标记
+（击杀者是玩家时为 1），看板据此从既有死亡数据实时推导，旧数据按「击杀者名
+在已知玩家集合中」兑底判断，僵尸这生物名不会混进 PVP 榜。
+
+### 游戏模式巡检兜底（为什么有了 /gamemode 记录还要巡检）
+
+Forge 1.20.1 **没有**「玩家游戏模式变化」事件，KubeJS 6 也没有 —— 命令事件只能
+捕获走命令系统的 `/gamemode`；整合包 GUI 一键切换、mod 直接调用 `setGameMode()`
+等非命令途径完全不产生命令，会造成「玩家明明切了模式却没有任何记录」的漏记。
+
+采集端每 5 秒（100 tick）巡检一次在线玩家的模式快照，发现变化即上报
+`ev=gmpatrol`（登录时只建快照不告警）。采集器会把「刚被命令记录过的同一次切换」
+（同玩家、同目标模式、120 秒窗口内）去重，同一次切换不会记两条；/gamemode 的
+数字 / 缩写参数（`1`、`c`）统一归一化，与巡检口径一致。
 
 ### 死亡统计是怎么来的
 
@@ -319,9 +365,11 @@ sudo bash deploy/uninstall.sh --purge    # 连台账一起删除
 | `server_log` | 安装时探测 | 服务端 `logs/latest.log` 路径 |
 | `poll_seconds` | `2` | 日志轮询间隔 |
 | `first_run_from_end` | `true` | 首次启动从文件末尾开始（避免把历史日志全部收进来） |
-| `log_tz` | 安装时探测 | 日志行时间戳的时区（仅当事件缺毫秒时间戳时用于兜底） |
+| `log_tz` | 安装时探测 | 日志行时间戳的时区（仅当事件缺毫秒时间戳时用于兑底） |
 | `enabled_types` | 见上表 | 记录哪些事件类型 |
 | `log_other_commands` | `false` | 是否把所有其它命令也记进台账 |
+| `vanilla_fallback` | `true` | 解析原版日志 `issued server command` 行作 KubeJS 失效兑底（跨源去重，不双记） |
+| `rotated_archive_scan` | `true` | 日志轮转时补读未处理过的 `*.log.gz`（防停机跨轮转丢数据） |
 | `dash_host` / `dash_port` | `0.0.0.0` / `25567` | 看板监听地址与端口 |
 | `site_title` | `Minecraft 管理员行为审计` | 看板标题 |
 | `require_token` | `true` | 是否启用访问令牌 |
@@ -359,6 +407,8 @@ sudo bash deploy/uninstall.sh --purge    # 连台账一起删除
 2. **控制台 / 命令方块 / 管理面板终端**执行的命令，执行者记为 `console`（无法区分是谁在面板里点的）。
 3. **服务端不开服时不产生新记录** —— 旁路设计的必然结果。
 4. 原版物品的**中文名**在服务端资源里不存在（服务端 jar 只带英文语言文件）。页面会显示英文名 + 物品 ID；想补中文名见 [FAQ](docs/faq.md#原版物品为什么没有中文名)。
+5. **行为统计在 KubeJS reload / 服务端重启时清零**：已入库的汇总不受影响，但重启后那 5 分钟窗口内未上报的计数会丢。低频操作，实际影响可忽略。
+6. **巡检只能发现「巡检周期内保持住」的模式变化**：若玩家 5 秒内切过去又切回，快照可能恰好错过（命令途径的记录不受影响，因为命令事件是逐条触发的）。
 
 ---
 
@@ -377,10 +427,10 @@ sudo bash deploy/uninstall.sh --purge    # 连台账一起删除
 ## 开发与测试
 
 ```bash
-# 采集器解析逻辑（63 项：命令 / 死亡事件 / 死因 id 归一化 / 时间换算 / 选择器处理）
+# 采集器解析逻辑（121 项：命令 / 死亡 / 行为统计 / 巡检 / 兕底 / 跨源去重 / 归档补读）
 python3 tests/test_watcher.py
 
-# 看板鉴权 + 数据聚合 + 排行榜百分位（83 项）
+# 看板鉴权 + 数据聚合 + 六张排行榜（114 项）
 python3 tests/test_dashboard.py
 ```
 
@@ -435,9 +485,9 @@ minecraft-op-audit/
 
 ## English
 
-**minecraft-op-audit** — a sidecar audit system for Minecraft servers that records every administrative command (who gave what to whom, who switched gamemodes, who granted OP) plus **every player death**, and serves it through a web dashboard with a **daily leaderboard**, a timeline view and a per-player view.
+**minecraft-op-audit** — a sidecar audit system for Minecraft servers that records every administrative command (who gave what to whom, who switched gamemodes, who granted OP) plus **every player death** and **player behavior stats** (blocks broken / placed, mobs & players killed), and serves it through a web dashboard with **six daily leaderboards**, a timeline view and a per-player view.
 
-- **Zero changes to the server itself.** A single KubeJS script emits one `[MCAUDIT]` log line per command and per player death; a Python collector tails `logs/latest.log` and writes CSV/JSONL ledgers; a dependency-free Python dashboard renders them.
+- **Zero changes to the server itself.** A single KubeJS script emits one `[MCAUDIT]` log line per command, per player death, and per 5-minute behavior-stats window; a gamemode patrol (5s snapshot diff) catches mode switches done **outside the command system** (mod GUIs, direct API calls). A Python collector tails `logs/latest.log` (with vanilla-log fallback & rotated-archive catch-up) and writes CSV/JSONL ledgers; a dependency-free Python dashboard renders them.
 - **Leaderboard percentiles** follow the FF14 Logs colour scheme: `100` gold, `99` pink, `91–98` orange, `76–90` purple, `51–75` blue, `26–50` green, `1–25` grey. The daily top scorer always gets 100; ties share a percentile; players with zero are not ranked.
 - **Requires** Minecraft Java + KubeJS 6 on the server, and Python 3.9+ for the collector.
 - **Install**: `git clone … && cd minecraft-op-audit && sudo bash deploy/install.sh`
@@ -449,3 +499,5 @@ See [docs/quickstart.md](docs/quickstart.md) for details.
 ## License
 
 [MIT](LICENSE)
+
+> AI生成

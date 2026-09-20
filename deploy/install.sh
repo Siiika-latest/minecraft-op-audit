@@ -190,8 +190,11 @@ conf["site_title"] = title
 conf.setdefault("poll_seconds", 2)
 conf.setdefault("first_run_from_end", True)
 conf.setdefault("enabled_types", ["give", "item_set", "loot", "clear", "gamemode",
-                                  "gamemode_other", "enchant", "effect", "xp", "op", "summon"])
+                                  "gamemode_other", "enchant", "effect", "xp", "op", "summon",
+                                  "death", "stats"])
 conf.setdefault("log_other_commands", False)
+conf.setdefault("vanilla_fallback", True)
+conf.setdefault("rotated_archive_scan", True)
 conf.setdefault("dash_host", "0.0.0.0")
 conf.setdefault("dash_ports", [])
 conf.setdefault("lan_no_token", True)

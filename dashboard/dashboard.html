@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
+<link rel="icon" href="data:,"/>
 <title>Minecraft 管理员行为审计</title>
 <style>
 :root{
@@ -15,6 +16,7 @@
   --misc:#607089; --miscb:#eef1f6;
   --accent:#2f6feb; --danger:#e03131;
   --death:#c92a2a; --deathb:#ffe9e9;
+  --stats:#2f9e44; --statsb:#ebfbee;
   /* 排行榜色阶（浅色主题下用深一点的同色系，保证白底可读） */
   --t-gold:#8a6d1f;   --t-gold-bg:#f9f1da;
   --t-pink:#c2185b;   --t-pink-bg:#fde7ef;
@@ -36,6 +38,7 @@
     --misc:#94a3b8; --miscb:#232a34;
     --accent:#6ea8fe; --danger:#ff8787;
     --death:#ff8787; --deathb:#3a1f1f;
+    --stats:#69db7c; --statsb:#11331a;
     /* 排行榜色阶（深色主题下用 FF14 Logs 的原味配色） */
     --t-gold:#e5cc80;   --t-gold-bg:#3a3320;
     --t-pink:#e268a8;   --t-pink-bg:#3a2030;
@@ -63,12 +66,14 @@ button:hover,.btn:hover{border-color:var(--accent);color:var(--accent)}
 .stat{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px;box-shadow:var(--shadow)}
 .stat .k{color:var(--fg3);font-size:12px}
 .stat .v{font-size:23px;font-weight:650;line-height:1.25;margin-top:2px}
+.stat .v small{font-size:12px;color:var(--fg3);font-weight:400}
 .tabs{display:flex;gap:6px;margin-bottom:12px;border-bottom:1px solid var(--line)}
 .tabs button{border:0;background:transparent;border-radius:0;padding:9px 14px;color:var(--fg2);font-size:14.5px}
 .tabs button.on{color:var(--accent);border-bottom:2px solid var(--accent);font-weight:600}
 .filters{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px;
   display:flex;gap:12px;flex-wrap:wrap;align-items:center;box-shadow:var(--shadow);margin-bottom:14px}
 .filters label,.lbctl label{color:var(--fg3);font-size:12.5px;margin-right:4px}
+.filters .clearp{margin-left:auto}
 select,input[type=search]{font:inherit;background:var(--panel2);color:var(--fg);border:1px solid var(--line);
   border-radius:8px;padding:6px 9px;outline:none;min-width:120px}
 select:focus,input:focus{border-color:var(--accent)}
@@ -85,6 +90,7 @@ select:focus,input:focus{border-color:var(--accent)}
 .ev.gamemode{border-left-color:var(--gm)}
 .ev.gamemode_other{border-left-color:var(--gm2)}
 .ev.item_set{border-left-color:var(--item)}
+.ev.stats{border-left-color:var(--stats)}
 .ev .t{color:var(--fg2);font-variant-numeric:tabular-nums;font-size:13px;min-width:66px;padding-top:1px}
 .ev .body{flex:1;min-width:0}
 .ev .l1{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
@@ -93,7 +99,11 @@ select:focus,input:focus{border-color:var(--accent)}
 .badge.gamemode{background:var(--gmb);color:var(--gm)}
 .badge.gamemode_other{background:var(--gm2b);color:var(--gm2)}
 .badge.item_set{background:var(--itemb);color:var(--item)}
+.badge.stats{background:var(--statsb);color:var(--stats)}
 .who{font-weight:600}
+.plink{color:var(--accent);text-decoration:none;cursor:pointer}
+.plink:hover{text-decoration:underline}
+.plink.self{color:var(--fg);text-decoration:underline dotted;text-underline-offset:3px}
 .arrow{color:var(--fg3)}
 .item{margin-top:3px;display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
 .item .zh{font-weight:600}
@@ -115,6 +125,7 @@ select:focus,input:focus{border-color:var(--accent)}
 .pitem:last-child{border-bottom:0}
 .pitem:hover{background:var(--panel2)}
 .pitem.on{background:var(--panel2);box-shadow:inset 3px 0 0 var(--accent)}
+.pitem.half .nm,.pitem.half .ava{opacity:.55}
 .ava{width:26px;height:26px;border-radius:8px;display:grid;place-items:center;color:#fff;font-size:12px;font-weight:700;flex:0 0 auto}
 .pitem .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pitem .ct{font-size:12px;color:var(--fg3)}
@@ -122,6 +133,8 @@ select:focus,input:focus{border-color:var(--accent)}
   margin-bottom:12px;box-shadow:var(--shadow)}
 .phead .nm{font-size:17px;font-weight:650}
 .phead .meta{color:var(--fg3);font-size:12.5px;margin-top:3px}
+.phead .tools{margin-top:6px;font-size:12.5px}
+.phead .tools a{margin-right:12px}
 .tags{display:flex;gap:8px;flex-wrap:wrap;margin-top:9px}
 .tag{background:var(--panel2);border:1px solid var(--line);border-radius:999px;padding:3px 10px;font-size:12.5px;color:var(--fg2)}
 .empty{color:var(--fg3);text-align:center;padding:40px 10px;background:var(--panel);
@@ -143,7 +156,7 @@ select:focus,input:focus{border-color:var(--accent)}
   padding:11px 14px;border-bottom:1px solid var(--line)}
 .lbcard>.lh .ttl{font-weight:650}
 .lbcard>.lh .sub{color:var(--fg3);font-size:12px}
-.lbrow{display:grid;grid-template-columns:34px 1fr 78px 52px;gap:10px;align-items:center;
+.lbrow{display:grid;grid-template-columns:34px 1fr 88px 52px;gap:10px;align-items:center;
   padding:8px 14px;border-bottom:1px solid var(--line)}
 .lbrow:last-child{border-bottom:0}
 .lbrow:hover{background:var(--panel2)}
@@ -205,6 +218,7 @@ select:focus,input:focus{border-color:var(--accent)}
     <div><label>玩家</label><select id="player"><option value="">全部玩家</option></select></div>
     <div class="chips" id="types"></div>
     <div><label>搜索</label><input type="search" id="q" placeholder="物品 / 玩家 / 关键词"/></div>
+    <div class="clearp"><a href="#" class="plink" id="clearPlayer" style="display:none">清除玩家筛选</a></div>
   </section>
 
   <main id="view"></main>
@@ -214,14 +228,18 @@ select:focus,input:focus{border-color:var(--accent)}
     <code>logs/latest.log</code> 解析入库。全程只读，不修改服务端任何文件。
     <br/>
     <span class="pill">覆盖范围</span>给物品 <code>/give</code>、<code>/item replace</code>、<code>/loot</code>、游戏模式切换
-    <code>/gamemode</code>、附魔 <code>/enchant</code>、药水 <code>/effect</code>、经验 <code>/xp</code>、
-    清背包 <code>/clear</code>、权限变更 <code>/op</code>、刷实体 <code>/summon</code>、玩家死亡。
+    <code>/gamemode</code>（另有 5 秒一次的<b>模式巡检</b>兜底：整合包 GUI 等<b>非命令途径</b>的切换也能记到）、
+    附魔 <code>/enchant</code>、药水 <code>/effect</code>、经验 <code>/xp</code>、清背包 <code>/clear</code>、
+    权限变更 <code>/op</code>、刷实体 <code>/summon</code>、玩家死亡、玩家行为统计汇总
+    （破坏 / 放置方块、击杀生物 / 玩家，每 5 分钟聚合上报一次）。
     <br/>
-    <span class="pill">排行榜</span>按<b>天</b>统计「管理行为次数」与「死亡次数」两榜，百分位配色参考 FF14 Logs：
-    最高为 <span class="tier t-gold">100</span> 金色、<span class="tier t-pink">99</span> 粉色、
+    <span class="pill">排行榜</span>按<b>天</b>统计六张榜：管理行为、死亡次数、破坏方块、放置方块、击杀生物、PVP 击杀。
+    百分位配色参考 FF14 Logs：最高为 <span class="tier t-gold">100</span> 金色、<span class="tier t-pink">99</span> 粉色、
     <span class="tier t-orange">91–98</span> 橙色，依次为
     <span class="tier t-purple">76–90</span> 紫色、<span class="tier t-blue">51–75</span> 蓝色、
     <span class="tier t-green">26–50</span> 绿色、<span class="tier t-gray">1–25</span> 灰色。
+    <br/>
+    <span class="pill">操作提示</span>时间轴 / 玩家板块 / 排行榜里的<b>玩家名都可以点击</b>，直接筛选该玩家的全部记录。
     <br/>
     <span class="pill">说明</span>管理员在<b>创造模式物品栏</b>里直接拖拽拿物品不会产生任何命令，因此无法记录；
     这类行为只能通过「切换游戏模式」记录间接佐证。控制台 / 命令方块执行的命令，执行者记为 <code>console</code>。
@@ -233,16 +251,23 @@ select:focus,input:focus{border-color:var(--accent)}
 <script>
 const K = new URLSearchParams(location.search).get('k') || '';
 const TYPES = [['give','管理员取物'],['gamemode','切换游戏模式'],['gamemode_other','切换他人模式'],
-               ['item_set','管理员设物'],['enchant','附魔'],['effect','药水'],['clear','清背包'],
-               ['death','玩家死亡'],['give_failed','取物失败']];
+               ['item_set','管理员设物'],['loot','掉落物'],['enchant','附魔'],['effect','药水'],
+               ['xp','给经验'],['clear','清背包'],['op','权限变更'],['summon','刷实体'],
+               ['death','玩家死亡'],['stats','行为统计'],['give_failed','取物失败']];
 const TIER_CN = {gold:'金色',pink:'粉色',orange:'橙色',purple:'紫色',blue:'蓝色',green:'绿色',gray:'灰色'};
-const state = {view:'timeline', days:'7', player:'', types:[], q:'', limit:800, lb:'', data:null};
+const state = {view:'timeline', days:'7', player:'', types:[], q:'', limit:800, lb:'', data:null, sig:''};
 
 function esc(s){return (s==null?'':String(s)).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function colorOf(name){let h=0;for(const c of (name||'?'))h=(h*31+c.charCodeAt(0))>>>0;return 'hsl('+(h%360)+',52%,46%)';}
 function api(path){return path + (path.includes('?')?'&':'?') + 'k=' + encodeURIComponent(K);}
+// 台账按北京日期分文件；浏览器 toISOString() 是 UTC，直接用会在北京时间 0–8 点指到昨天
+function bjToday(){return new Date(Date.now() + 8*3600*1000).toISOString().slice(0,10);}
+// 可点击的玩家名：点击即筛选该玩家（事件委托统一处理，见底部）
+function pl(name, cls){
+  return '<a href="#" class="plink' + (cls ? ' ' + cls : '') + '" data-p="' + esc(name) + '">' + esc(name) + '</a>';
+}
 
-async function load(){
+async function load(force){
   const p = new URLSearchParams({days:state.days, player:state.player, types:state.types.join(','),
                                  q:state.q, limit:state.limit, lb:state.lb});
   const r = await fetch(api('/api/data?' + p.toString()));
@@ -255,20 +280,28 @@ async function load(){
     document.title = state.data.site_title;
     document.getElementById('siteTitle').textContent = state.data.site_title;
   }
-  renderStats(); fillPlayers(); renderView();
+  // 内容没变就跳过重渲染（自动刷新不打断阅读：details 展开状态、滚动位置都保留）
+  const sig = (() => { const c = Object.assign({}, state.data); delete c.generated_at; return JSON.stringify(c); })();
   document.getElementById('upd').textContent = '更新于 ' + state.data.generated_at;
-  document.getElementById('dl-json').href = api('/download/events-' + new Date().toISOString().slice(0,10) + '.jsonl');
+  document.getElementById('dl-json').href = api('/download/events-' + bjToday() + '.jsonl');
+  if(!force && sig === state.sig){ return; }
+  state.sig = sig;
+  renderStats(); fillPlayers(); renderView();
 }
 
 function renderStats(){
-  const d = state.data, s = d.stats || {};
+  const d = state.data, s = d.stats || {}, n = d.nums || {};
   const items = [['筛选出事件', d.total_filtered], ['管理员取物', s.give||0],
                  ['切换游戏模式', (s.gamemode||0)+(s.gamemode_other||0)],
                  ['玩家死亡', s.death||0],
+                 ['破坏 / 放置方块', (n.broken||0) + ' <small>/ ' + (n.placed||0) + '</small>'],
+                 ['击杀 生物 / 玩家', (n.mob_kills||0) + ' <small>/ ' + (n.pvp_kills||0) + '</small>'],
                  ['涉及玩家', (d.players||[]).length], ['累计记录', d.total_all]];
   document.getElementById('stats').innerHTML = items.map(([k,v]) =>
     '<div class="stat"><div class="k">'+k+'</div><div class="v">'+v+'</div></div>').join('');
   document.getElementById('dl-csv').href = api('/download/events.csv');
+  const cp = document.getElementById('clearPlayer');
+  if(cp) cp.style.display = state.player ? '' : 'none';
 }
 
 function fillPlayers(){
@@ -284,30 +317,32 @@ function renderTypes(){
   document.querySelectorAll('#types .chip').forEach(el => el.onclick = () => {
     const t = el.dataset.t, i = state.types.indexOf(t);
     i < 0 ? state.types.push(t) : state.types.splice(i,1);
-    renderTypes(); load();
+    renderTypes(); load(true);
   });
 }
 
 function evCard(e){
   const t = e.type, cn = (state.data.type_cn||{})[t] || t;
   const isDeath = (t === 'death');
-  const item = (!isDeath && (e.item_zh || e.item_en || e.item_raw))
+  const item = (!isDeath && t !== 'stats' && (e.item_zh || e.item_en || e.item_raw))
     ? '<div class="item">'
       + '<span class="zh">' + esc(e.item_zh || e.item_en || e.item_raw) + '</span>'
       + (e.item_id ? '<span class="id">' + esc(e.item_id) + '</span>' : '')
       + (e.item_en && e.item_zh && e.item_en !== e.item_zh ? '<span class="en">' + esc(e.item_en) + '</span>' : '')
       + (e.count ? '<span class="cnt">×' + e.count + '</span>' : '')
-      + (e.item_id ? '' : '<span class="en">（未匹配到 ID）</span>')
+      // 只有「物品类」事件才提示未匹配 ID；附魔/药水/经验本来就没有物品 ID 概念
+      + (e.item_id ? '' : (['give','loot','item_set'].includes(t) ? '<span class="en">（未匹配到 ID）</span>' : ''))
       + '</div>' : '';
   const who = isDeath
-    ? '<span class="who">' + esc(e.actor || '-') + '</span>'
-      + (e.killer ? '<span class="arrow"> 被 </span><span class="killer">' + esc(e.killer)
+    ? '<span class="who">' + pl(e.actor || '-') + '</span>'
+      + (e.killer ? '<span class="arrow"> 被 </span><span class="killer">'
+                    + (e.kp ? pl(e.killer) : esc(e.killer))   // 只把「玩家击杀者」做成可点击
                     + '</span><span class="arrow"> 击杀</span>' : '')
       + (e.cause_cn ? '<span class="pill" title="死因 id：' + esc(e.cause || '') + '">'
                       + esc(e.cause_cn) + '</span>' : '')
     : ((e.actor && e.target && e.actor !== e.target)
-        ? '<span class="who">' + esc(e.actor) + '</span><span class="arrow"> → </span><span class="who">' + esc(e.target) + '</span>'
-        : '<span class="who">' + esc(e.actor || e.target || '-') + '</span>');
+        ? '<span class="who">' + pl(e.actor) + '</span><span class="arrow"> → </span><span class="who">' + pl(e.target) + '</span>'
+        : '<span class="who">' + pl(e.actor || e.target || '-') + '</span>');
   const dm = (isDeath && e.msg) ? '<div class="msg">游戏内死讯：' + esc(e.msg) + '</div>' : '';
   return '<div class="ev ' + esc(t) + '">'
     + '<div class="t">' + esc((e.ts||'').slice(11)) + '</div>'
@@ -326,16 +361,16 @@ function tierHtml(pct, tier){
     + pct + '</span>';
 }
 
-function lbCard(title, rows, total, emptyText){
+function lbCard(title, rows, total, emptyText, unit){
   const head = '<div class="lh"><span class="ttl">' + esc(title) + '</span>'
-    + '<span class="sub">' + (rows.length ? rows.length + ' 人上榜 · 当日共 ' + total + ' 次' : '暂无数据') + '</span></div>';
+    + '<span class="sub">' + (rows.length ? rows.length + ' 人上榜 · 当日共 ' + total + (unit||'次') : '暂无数据') + '</span></div>';
   const body = rows.length
     ? rows.map((r,i) => '<div class="lbrow' + (i===0?' first':'') + '">'
         + '<span class="rk">' + (i===0 ? '★' : r.rank) + '</span>'
         + '<span class="nm"><span class="ava" style="background:' + colorOf(r.name) + '">'
           + esc((r.name||'?').slice(0,1).toUpperCase()) + '</span>'
-          + '<span class="tx">' + esc(r.name) + '</span></span>'
-        + '<span class="vl">' + r.value + '<i>次</i></span>'
+          + '<span class="tx">' + pl(r.name) + '</span></span>'
+        + '<span class="vl">' + r.value + '<i>' + (unit||'次') + '</i></span>'
         + tierHtml(r.pct, r.tier)
         + '</div>').join('')
     : '<div class="lbempty">' + esc(emptyText) + '</div>';
@@ -361,10 +396,15 @@ function renderLeaderboard(){
   return '<div class="lbctl">'
     + '<div><label>统计日期</label><select id="lbday">' + opts + '</select></div>'
     + '<div class="hint">百分位 = 当天「你胜过或战平的人数」占上榜玩家的比例，最高为 100；并列者同色，'
-    + '次数为 0 的玩家不上榜。榜单只按日期统计，不受上方筛选条件影响。</div></div>'
+    + '数值为 0 的玩家不上榜。榜单只按日期统计，不受上方筛选条件影响。'
+    + '破坏/放置/击杀来自采集端每 5 分钟的汇总上报；PVP 击杀按死亡事件实时统计。</div></div>'
     + '<div class="lb">'
-    + lbCard('管理员行为榜', lb.admin||[], lb.admin_total||0, '当日没有人执行管理命令')
-    + lbCard('死亡次数榜', lb.death||[], lb.death_total||0, '当日没有人死亡')
+    + lbCard('管理员行为榜', lb.admin||[], lb.admin_total||0, '当日没有人执行管理命令', '次')
+    + lbCard('死亡次数榜',   lb.death||[], lb.death_total||0, '当日没有人死亡', '次')
+    + lbCard('破坏方块榜',   lb.broken||[], lb.broken_total||0, '当日没有破坏记录', '个')
+    + lbCard('放置方块榜',   lb.placed||[], lb.placed_total||0, '当日没有放置记录', '个')
+    + lbCard('击杀生物榜',   lb.kills||[],  lb.kills_total||0,  '当日没有击杀记录', '只')
+    + lbCard('PVP 击杀榜',   lb.pvp||[],    lb.pvp_total||0,    '当日没有玩家互杀', '次')
     + '</div>' + tierLegend();
 }
 
@@ -372,9 +412,9 @@ function renderTimeline(){
   const evs = state.data.events || [];
   if(!evs.length) return '<div class="empty">没有符合条件的记录。<br/>服务端开服后，执行上述命令即会自动记录，无需任何额外操作。</div>';
   const groups = {};
-  evs.forEach(e => (groups[e.date_bj] = groups[e.date_bj] || []).push(e));
+  evs.forEach(e => (groups[e.date_bj || '未知日期'] = groups[e.date_bj || '未知日期'] || []).push(e));
   return Object.keys(groups).sort().reverse().map(d =>
-    '<div class="daygroup"><div class="hd"><span>' + d + '（' + groups[d].length + ' 条）</span><span class="ln"></span></div>'
+    '<div class="daygroup"><div class="hd"><span>' + esc(d) + '（' + groups[d].length + ' 条）</span><span class="ln"></span></div>'
     + groups[d].map(evCard).join('') + '</div>').join('')
     + (state.data.total_filtered > evs.length ? '<div class="empty">仅显示最近 ' + evs.length + ' 条，共 ' + state.data.total_filtered + ' 条，请缩小筛选范围。</div>' : '');
 }
@@ -397,22 +437,31 @@ function renderPlayers(){
       + (ar ? '管理 ' + tierHtml(ar.pct, ar.tier) : '')
       + (dr ? ' 死亡 ' + tierHtml(dr.pct, dr.tier) : '') + '</span>'
     : '';
-  return '<div class="layout"><div class="plist"><div class="ph">玩家（按记录数排序）</div>'
+  const act = [
+    (me.broken ? '<span class="tag">破坏方块 ' + me.broken + '</span>' : ''),
+    (me.placed ? '<span class="tag">放置方块 ' + me.placed + '</span>' : ''),
+    (me.mob_kills ? '<span class="tag">击杀生物 ' + me.mob_kills + '</span>' : ''),
+    (me.pvp_kills ? '<span class="tag">PVP 击杀 ' + me.pvp_kills + '</span>' : '')
+  ].join('');
+  return '<div class="layout"><div class="plist"><div class="ph">玩家（按记录数排序 · 点击查看）</div>'
+    + '<div class="pitem' + (state.player ? '' : ' half') + '" data-p=""><span class="ava" style="background:var(--fg3)">∀</span>'
+      + '<span class="nm">全部玩家（不筛选）</span><span class="ct"></span></div>'
     + ps.map(p => '<div class="pitem' + (p.name===me.name?' on':'') + '" data-p="' + esc(p.name) + '">'
         + '<span class="ava" style="background:' + colorOf(p.name) + '">' + esc(p.name.slice(0,1).toUpperCase()) + '</span>'
         + '<span class="nm">' + esc(p.name) + '</span><span class="ct">' + p.count + '</span></div>').join('')
     + '</div><div><div class="phead"><div class="nm">' + esc(me.name) + '</div>'
     + '<div class="meta">作为执行者 ' + (me.as_actor||0) + ' 次 · 作为对象 ' + (me.as_target||0)
     + ' 次 · 死亡 ' + (me.deaths||0) + ' 次 · 最近 ' + esc(me.last||'-') + '</div>'
+    + '<div class="tools"><a href="#" class="plink" data-p="' + esc(me.name) + '" data-view="timeline">在时间轴中查看</a>'
+      + '<a href="#" class="plink" data-p="">查看全部玩家</a></div>'
     + '<div class="tags"><span class="tag">取物 ' + (me.give||0) + '</span><span class="tag">模式切换 ' + (me.gamemode||0) + '</span>'
-    + '<span class="tag">死亡 ' + (me.deaths||0) + '</span>' + lbTag
+    + '<span class="tag">死亡 ' + (me.deaths||0) + '</span>' + act + lbTag
     + top.map(([k,v]) => '<span class="tag">' + esc(k) + ' ×' + v + '</span>').join('') + '</div></div>'
     + (mine.length ? mine.map(evCard).join('') : '<div class="empty">该玩家暂无记录</div>')
     + '</div></div>';
 }
 
 function renderView(){
-  document.querySelectorAll('.pitem').forEach(el => el.onclick = () => { state.player = el.dataset.p; load(); });
   const v = state.view;
   // 排行榜是按日期统计的，与顶部的天数/玩家/类型筛选无关，故隐藏筛选栏避免误解
   const f = document.querySelector('.filters');
@@ -422,21 +471,41 @@ function renderView(){
     : v === 'players'  ? renderPlayers()
     : renderLeaderboard();
   const lbd = document.getElementById('lbday');
-  if(lbd) lbd.onchange = e => { state.lb = e.target.value; load(); };
+  if(lbd) lbd.onchange = e => { state.lb = e.target.value; load(true); };
 }
+
+// ── 全局事件委托：一切 [data-p] 元素（玩家名 / 玩家列表项）点击即筛选 ──
+// 旧版把绑定写在 renderView() 渲染 innerHTML 之前，绑定的是旧 DOM，渲染后
+// 全部失效 —— 这就是「玩家板块点玩家名没反应，只能用顶部筛选」的根因。
+// 委托挂在不被重建的容器上，一劳永逸。data-view 可指定点击后落到哪个视图。
+document.getElementById('view').addEventListener('click', e => {
+  const el = e.target.closest('[data-p]');
+  if(!el) return;
+  e.preventDefault();
+  state.player = el.dataset.p || '';
+  state.view = el.dataset.view || 'players';
+  document.querySelectorAll('.tabs button').forEach(b =>
+    b.classList.toggle('on', b.dataset.view === state.view));
+  load(true);
+});
+document.getElementById('clearPlayer').onclick = e => {
+  e.preventDefault();
+  state.player = '';
+  load(true);
+};
 
 document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
   state.view = b.dataset.view;
   document.querySelectorAll('.tabs button').forEach(x => x.classList.toggle('on', x === b));
   renderView();
 });
-document.getElementById('days').onchange = e => { state.days = e.target.value; load(); };
-document.getElementById('player').onchange = e => { state.player = e.target.value; load(); };
-document.getElementById('refresh').onclick = load;
-let qt; document.getElementById('q').oninput = e => { clearTimeout(qt); qt = setTimeout(() => { state.q = e.target.value; load(); }, 350); };
+document.getElementById('days').onchange = e => { state.days = e.target.value; load(true); };
+document.getElementById('player').onchange = e => { state.player = e.target.value; load(true); };
+document.getElementById('refresh').onclick = () => load(true);
+let qt; document.getElementById('q').oninput = e => { clearTimeout(qt); qt = setTimeout(() => { state.q = e.target.value; load(true); }, 350); };
 
 renderTypes();
-load();
+load(true);
 setInterval(load, 30000);
 </script>
 </body>
