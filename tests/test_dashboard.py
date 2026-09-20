@@ -334,6 +334,30 @@ check("PVP 榜并列第一（Alice/Bob 各 1）",
       sorted([("Alice", 100, "gold"), ("Bob", 100, "gold")]))
 check("PVP 榜合计", slb["pvp_total"], 2)
 check("破坏榜合计", slb["broken_total"], 18)
+
+# ── v1.2.1：力工天榜（破坏 + 放置之和）与凶手视角筛选 ──
+check("力工天榜第一名（Alice 15+5）",
+      [(r["name"], r["value"]) for r in slb["labor"][:1]], [("Alice", 20)])
+check("力工天榜第二名（Bob 3+8）",
+      [(r["name"], r["value"]) for r in slb["labor"][1:]], [("Bob", 11)])
+check("力工天榜合计（18+13）", slb["labor_total"], 31)
+check("力工天榜百分位金色", slb["labor"][0]["tier"], "gold")
+check("旧日期力工天榜为空",
+      d.build_payload({"days": ["all"], "lb": ["2026-09-20"]}, conf)["leaderboard"]["labor"], [])
+# 凶手视角：查 Alice 时，她作为击杀者的死亡事件（Carol 之死）必须出现
+pka = d.build_payload({"days": ["all"], "player": ["Alice"]}, conf)
+carol_death = [e for e in pka["events"] if e.get("type") == "death"]
+check("击杀记录：凶手视角能看到被杀事件", len(carol_death), 1)
+check("击杀记录：标记为他是凶手", carol_death[0]["_view"], "他是凶手")
+check("击杀记录：记录了谁杀谁",
+      (carol_death[0]["actor"], carol_death[0]["killer"]), ("Carol", "Alice"))
+check("击杀记录：带时间戳", bool(carol_death[0]["ts"]), True)
+check("击杀记录：总条数含击杀事件（2 stats + 1 give + 1 凶手）", pka["total_filtered"], 4)
+# 对照：受害者视角标记为「他死亡」（死亡不是他执行的行为）
+pkc = d.build_payload({"days": ["all"], "player": ["Carol"]}, conf)
+check("受害者视角标记为「他死亡」",
+      sorted({e["_view"] for e in pkc["events"]}), ["他死亡"])
+
 check("旧日期（09-20）行为榜为空",
       d.build_payload({"days": ["all"], "lb": ["2026-09-20"]}, conf)["leaderboard"]["broken"], [])
 check("生物名不进 PVP 榜", "Zombie" in [r["name"] for r in slb["pvp"]], False)

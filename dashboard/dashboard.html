@@ -233,13 +233,15 @@ select:focus,input:focus{border-color:var(--accent)}
     权限变更 <code>/op</code>、刷实体 <code>/summon</code>、玩家死亡、玩家行为统计汇总
     （破坏 / 放置方块、击杀生物 / 玩家，每 5 分钟聚合上报一次）。
     <br/>
-    <span class="pill">排行榜</span>按<b>天</b>统计六张榜：管理行为、死亡次数、破坏方块、放置方块、击杀生物、PVP 击杀。
+    <span class="pill">排行榜</span>按<b>天</b>统计七张榜：管理行为、死亡次数、力工破坏方块、力工放置方块、
+    力工天榜（破坏+放置之和）、击杀生物、内鬼（玩家互杀）。
     百分位配色参考 FF14 Logs：最高为 <span class="tier t-gold">100</span> 金色、<span class="tier t-pink">99</span> 粉色、
     <span class="tier t-orange">91–98</span> 橙色，依次为
     <span class="tier t-purple">76–90</span> 紫色、<span class="tier t-blue">51–75</span> 蓝色、
     <span class="tier t-green">26–50</span> 绿色、<span class="tier t-gray">1–25</span> 灰色。
     <br/>
-    <span class="pill">操作提示</span>时间轴 / 玩家板块 / 排行榜里的<b>玩家名都可以点击</b>，直接筛选该玩家的全部记录。
+    <span class="pill">操作提示</span>时间轴 / 玩家板块 / 排行榜里的<b>玩家名都可以点击</b>，直接筛选该玩家的全部记录；
+    查某个玩家时会连带显示<b>他作为凶手的击杀记录</b>（标记「他是凶手」，含时间与被杀者）。
     <br/>
     <span class="pill">说明</span>管理员在<b>创造模式物品栏</b>里直接拖拽拿物品不会产生任何命令，因此无法记录；
     这类行为只能通过「切换游戏模式」记录间接佐证。控制台 / 命令方块执行的命令，执行者记为 <code>console</code>。
@@ -294,8 +296,8 @@ function renderStats(){
   const items = [['筛选出事件', d.total_filtered], ['管理员取物', s.give||0],
                  ['切换游戏模式', (s.gamemode||0)+(s.gamemode_other||0)],
                  ['玩家死亡', s.death||0],
-                 ['破坏 / 放置方块', (n.broken||0) + ' <small>/ ' + (n.placed||0) + '</small>'],
-                 ['击杀 生物 / 玩家', (n.mob_kills||0) + ' <small>/ ' + (n.pvp_kills||0) + '</small>'],
+                 ['力工 破坏/放置', (n.broken||0) + ' <small>/ ' + (n.placed||0) + '</small>'],
+                 ['击杀 生物/内鬼', (n.mob_kills||0) + ' <small>/ ' + (n.pvp_kills||0) + '</small>'],
                  ['涉及玩家', (d.players||[]).length], ['累计记录', d.total_all]];
   document.getElementById('stats').innerHTML = items.map(([k,v]) =>
     '<div class="stat"><div class="k">'+k+'</div><div class="v">'+v+'</div></div>').join('');
@@ -397,14 +399,16 @@ function renderLeaderboard(){
     + '<div><label>统计日期</label><select id="lbday">' + opts + '</select></div>'
     + '<div class="hint">百分位 = 当天「你胜过或战平的人数」占上榜玩家的比例，最高为 100；并列者同色，'
     + '数值为 0 的玩家不上榜。榜单只按日期统计，不受上方筛选条件影响。'
-    + '破坏/放置/击杀来自采集端每 5 分钟的汇总上报；PVP 击杀按死亡事件实时统计。</div></div>'
+    + '力工榜来自采集端每 5 分钟的破坏/放置汇总；力工天榜 = 破坏 + 放置之和；'
+    + '内鬼榜（玩家互杀）按死亡事件实时统计。</div></div>'
     + '<div class="lb">'
     + lbCard('管理员行为榜', lb.admin||[], lb.admin_total||0, '当日没有人执行管理命令', '次')
     + lbCard('死亡次数榜',   lb.death||[], lb.death_total||0, '当日没有人死亡', '次')
-    + lbCard('破坏方块榜',   lb.broken||[], lb.broken_total||0, '当日没有破坏记录', '个')
-    + lbCard('放置方块榜',   lb.placed||[], lb.placed_total||0, '当日没有放置记录', '个')
+    + lbCard('力工破坏方块榜', lb.broken||[], lb.broken_total||0, '当日没有破坏记录', '个')
+    + lbCard('力工放置方块榜', lb.placed||[], lb.placed_total||0, '当日没有放置记录', '个')
+    + lbCard('力工天榜',     lb.labor||[],  lb.labor_total||0,  '当日没有力工记录', '个')
     + lbCard('击杀生物榜',   lb.kills||[],  lb.kills_total||0,  '当日没有击杀记录', '只')
-    + lbCard('PVP 击杀榜',   lb.pvp||[],    lb.pvp_total||0,    '当日没有玩家互杀', '次')
+    + lbCard('内鬼榜',       lb.pvp||[],    lb.pvp_total||0,    '当日没有玩家互杀', '次')
     + '</div>' + tierLegend();
 }
 
@@ -424,7 +428,10 @@ function renderPlayers(){
   if(!ps.length) return '<div class="empty">暂无玩家行为记录。</div>';
   const cur = state.player || ps[0].name;
   const me = ps.find(p => p.name === cur) || ps[0];
-  const mine = (state.data.events || []).filter(e => e.actor === me.name || e.target === me.name);
+  // 含击杀记录：死亡事件 killer 刻意不写进 target，这里补一条 killer 匹配，
+  // 「查 yuuki 杀过谁」才能看到他的击杀记录（后端筛选已同步）
+  const mine = (state.data.events || []).filter(e => e.actor === me.name || e.target === me.name
+    || (e.type === 'death' && e.killer === me.name));
   const items = {};
   mine.forEach(e => { const k = e.item_zh || e.item_en || ''; if(k) items[k] = (items[k]||0) + (e.count||1); });
   const top = Object.entries(items).sort((a,b)=>b[1]-a[1]).slice(0,6);
@@ -441,7 +448,7 @@ function renderPlayers(){
     (me.broken ? '<span class="tag">破坏方块 ' + me.broken + '</span>' : ''),
     (me.placed ? '<span class="tag">放置方块 ' + me.placed + '</span>' : ''),
     (me.mob_kills ? '<span class="tag">击杀生物 ' + me.mob_kills + '</span>' : ''),
-    (me.pvp_kills ? '<span class="tag">PVP 击杀 ' + me.pvp_kills + '</span>' : '')
+    (me.pvp_kills ? '<span class="tag">内鬼击杀 ' + me.pvp_kills + '</span>' : '')
   ].join('');
   return '<div class="layout"><div class="plist"><div class="ph">玩家（按记录数排序 · 点击查看）</div>'
     + '<div class="pitem' + (state.player ? '' : ' half') + '" data-p=""><span class="ava" style="background:var(--fg3)">∀</span>'

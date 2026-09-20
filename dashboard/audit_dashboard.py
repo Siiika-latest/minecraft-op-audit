@@ -115,18 +115,19 @@ def percentile_rows(counter):
 
 
 def build_leaderboard(evs, day=""):
-    """按「天」出榜：管理行为次数榜 + 死亡次数榜，以及四张行为统计榜
-    （破坏方块 / 放置方块 / 击杀生物 / PVP 击杀）。
+    """按「天」出榜：管理行为次数榜 + 死亡次数榜，以及五张行为统计榜
+    （力工破坏方块 / 力工放置方块 / 力工天榜 / 击杀生物 / 内鬼）。
 
     刻意不受页面上的 天数/玩家/类型 筛选影响 —— 榜单要能横着比。
     行为统计榜的数值 = 当天该玩家所有 stats 汇总事件的数值之和；
-    PVP 榜 = 当天死亡事件中击杀者为玩家的次数（不与 stats 双计）。
+    力工天榜 = 破坏 + 放置的总和；
+    内鬼榜（玩家互杀） = 当天死亡事件中击杀者为玩家的次数（不与 stats 双计）。
     """
     days = sorted({e.get("date_bj", "") for e in evs if e.get("date_bj")})
     date = day if day in days else (days[-1] if days else "")
     known = known_player_names(evs)
     admin, death = {}, {}
-    broken, placed, kills, pvp = {}, {}, {}, {}
+    broken, placed, kills, pvp, labor = {}, {}, {}, {}, {}
     for e in evs:
         if e.get("date_bj") != date:
             continue
@@ -139,6 +140,9 @@ def build_leaderboard(evs, day=""):
                 v = e.get(src) or 0
                 if v > 0:
                     dst[actor] = dst.get(actor, 0) + v
+            tot = (e.get("broken") or 0) + (e.get("placed") or 0)
+            if tot > 0:
+                labor[actor] = labor.get(actor, 0) + tot
             continue
         if t == "death":
             actor = clean_name(e.get("actor", ""))
@@ -155,6 +159,7 @@ def build_leaderboard(evs, day=""):
     a_rows, d_rows = percentile_rows(admin), percentile_rows(death)
     b_rows, p_rows = percentile_rows(broken), percentile_rows(placed)
     k_rows, v_rows = percentile_rows(kills), percentile_rows(pvp)
+    l_rows = percentile_rows(labor)
     return {
         "date": date,
         "days": days,
@@ -162,12 +167,14 @@ def build_leaderboard(evs, day=""):
         "death": d_rows,
         "broken": b_rows,
         "placed": p_rows,
+        "labor": l_rows,
         "kills": k_rows,
         "pvp": v_rows,
         "admin_total": sum(admin.values()),
         "death_total": sum(death.values()),
         "broken_total": sum(broken.values()),
         "placed_total": sum(placed.values()),
+        "labor_total": sum(labor.values()),
         "kills_total": sum(kills.values()),
         "pvp_total": sum(pvp.values()),
         "tiers": [{"lo": lo, "hi": hi, "key": k} for lo, hi, k in TIER_TABLE],
@@ -311,7 +318,11 @@ def build_payload(q, conf):
 
     sel = evs
     if player:
-        sel = [e for e in sel if e.get("actor") == player or e.get("target") == player]
+        # 击杀者匹配：查某玩家时，他作为凶手（kp 标记或名字在已知玩家集合）的死亡事件也要出现，
+        # 否则「查 yuuki 杀过谁」会漏掉全部击杀记录（死亡事件的 killer 刻意不写进 target，
+        # 防止僵尸等生物名混进玩家榜）
+        sel = [e for e in sel if e.get("actor") == player or e.get("target") == player
+               or (e.get("type") == "death" and killer_player(e, known) == player)]
     if types:
         sel = [e for e in sel if e.get("type") in types]
     if days and days != "all":
@@ -342,7 +353,14 @@ def build_payload(q, conf):
     shown = sel[:limit]
     if player:
         for e in shown:
-            e["_view"] = "他执行" if e.get("actor") == player else "作用对象"
+            if e.get("type") == "death" and e.get("actor") == player:
+                e["_view"] = "他死亡"                # 该玩家是这次死亡的死者
+            elif e.get("actor") == player:
+                e["_view"] = "他执行"
+            elif e.get("type") == "death" and killer_player(e, known) == player:
+                e["_view"] = "他是凶手"              # 该玩家是这次击杀的击杀者
+            else:
+                e["_view"] = "作用对象"
     return {
         "site_title": conf.get("site_title") or DEFAULT_TITLE,
         "generated_at": datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S"),
